@@ -2,9 +2,9 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 
-import 'package:my_first_flutter_app/account_store.dart';
-import 'package:my_first_flutter_app/backend/auth_service.dart';
-import 'package:my_first_flutter_app/job_store.dart';
+import 'package:habi/data/account_store.dart';
+import 'package:habi/backend/auth_service.dart';
+import 'package:habi/data/job_store.dart';
 
 void main() {
   test('explains how to resolve missing Firebase Auth configuration', () {

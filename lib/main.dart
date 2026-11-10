@@ -1,11 +1,11 @@
 import 'package:flutter/material.dart';
 
-import 'backend/auth_gate.dart';
-import 'backend/firebase_config.dart';
-import 'backend/firebase_services.dart';
-import 'backend/firebase_setup_screen.dart';
-import 'habi_appearance.dart';
-import 'habi_colors.dart';
+import 'package:habi/backend/auth_gate.dart';
+import 'package:habi/backend/firebase_config.dart';
+import 'package:habi/backend/firebase_services.dart';
+import 'package:habi/backend/firebase_setup_screen.dart';
+import 'package:habi/shared/theme/habi_appearance.dart';
+import 'package:habi/shared/theme/habi_colors.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();

@@ -2,7 +2,7 @@ import 'dart:typed_data';
 
 import 'package:firebase_storage/firebase_storage.dart';
 
-import 'firebase_services.dart';
+import 'package:habi/backend/firebase_services.dart';
 
 class HabiStorageService {
   HabiStorageService._();

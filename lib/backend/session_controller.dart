@@ -1,9 +1,9 @@
-import '../account_store.dart';
-import '../employer_store.dart';
-import '../job_store.dart';
-import '../message_store.dart';
-import '../notification_store.dart';
-import 'auth_service.dart';
+import 'package:habi/data/account_store.dart';
+import 'package:habi/data/employer_store.dart';
+import 'package:habi/data/job_store.dart';
+import 'package:habi/data/message_store.dart';
+import 'package:habi/data/notification_store.dart';
+import 'package:habi/backend/auth_service.dart';
 
 /// Clears user-scoped memory before ending the Firebase session.
 class HabiSessionController {

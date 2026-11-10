@@ -1,18 +1,20 @@
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 
-import '../account_store.dart';
-import '../employer_profile_setup_screen.dart';
-import '../employer_screen.dart';
-import '../employer_store.dart';
-import '../home_screen.dart';
-import '../job_store.dart';
-import '../message_store.dart';
-import '../notification_store.dart';
-import '../profile_setup_screen.dart';
-import '../splash_screen.dart';
-import 'auth_service.dart';
-import 'session_controller.dart';
+import 'package:habi/data/account_store.dart';
+import 'package:habi/features/employer/employer_profile_setup_screen.dart';
+import 'package:habi/features/employer/employer_screen.dart';
+import 'package:habi/data/employer_store.dart';
+import 'package:habi/features/home/home_screen.dart';
+import 'package:habi/data/job_store.dart';
+import 'package:habi/data/message_store.dart';
+import 'package:habi/data/notification_store.dart';
+import 'package:habi/features/profile/profile_setup_screen.dart';
+import 'package:habi/features/auth/splash_screen.dart';
+import 'package:habi/backend/auth_service.dart';
+import 'package:habi/backend/session_controller.dart';
+import 'package:habi/data/repositories/user_settings_repository.dart';
+import 'package:habi/shared/theme/habi_appearance.dart';
 
 class HabiAuthGate extends StatelessWidget {
   const HabiAuthGate({super.key});
@@ -51,6 +53,15 @@ class _SignedInRouterState extends State<_SignedInRouter> {
     if (data == null) {
       await HabiSessionController.instance.signOut();
       return const SplashScreen();
+    }
+    try {
+      final preferences = await FirestoreUserSettingsRepository().load(
+        widget.user.uid,
+      );
+      final darkMode = preferences['darkMode'];
+      if (darkMode is bool) HabiAppearance.instance.setDarkMode(darkMode);
+    } catch (error) {
+      debugPrint('Could not load saved app settings: $error');
     }
     final role = data['role'] as String?;
     JobStore.instance.bindUser(widget.user.uid);
