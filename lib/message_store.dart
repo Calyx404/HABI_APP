@@ -1,201 +1,395 @@
+import 'dart:async';
 import 'dart:math' as math;
 
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/foundation.dart';
 
-import 'notification_store.dart';
+import 'backend/firebase_services.dart';
 
 class ChatMessage {
   ChatMessage({
+    required this.id,
+    required this.senderId,
     required this.from,
     required this.text,
     required this.time,
   });
 
+  final String id;
+  final String senderId;
   final String from;
   final String text;
   final DateTime time;
+
+  factory ChatMessage.fromFirestore(String id, Map<String, dynamic> data) =>
+      ChatMessage(
+        id: id,
+        senderId: data['senderId'] as String? ?? '',
+        from: data['senderName'] as String? ?? '',
+        text: data['text'] as String? ?? '',
+        time: (data['createdAt'] as Timestamp?)?.toDate() ?? DateTime.now(),
+      );
 }
 
-/// A chat between the person who posted a job and one applicant.
 class Conversation {
   Conversation({
     required this.id,
     required this.jobId,
     required this.jobTitle,
     required this.poster,
+    required this.posterId,
     required this.applicant,
-  });
+    required this.applicantId,
+    List<ChatMessage>? initialMessages,
+    Map<String, int>? seen,
+    Map<String, int>? cleared,
+    Set<String>? archived,
+  }) : messages = initialMessages ?? [],
+       _seen = seen ?? {},
+       _cleared = cleared ?? {},
+       _archived = archived ?? {};
 
   final String id;
   final String jobId;
   final String jobTitle;
   final String poster;
+  final String posterId;
   final String applicant;
-  final List<ChatMessage> messages = [];
-  final Map<String, int> _seen = {};
-  final Map<String, int> _cleared = {};
-  final Set<String> _archived = {};
+  final String applicantId;
+  final List<ChatMessage> messages;
+  final Map<String, int> _seen;
+  final Map<String, int> _cleared;
+  final Set<String> _archived;
 
-  String otherPerson(String user) => user == poster ? applicant : poster;
-
-  /// The messages this person can see. After they delete the chat, only
-  /// newer messages show.
-  List<ChatMessage> messagesFor(String user) =>
-      messages.sublist(_cleared[user] ?? 0);
-
-  ChatMessage? lastFor(String user) {
-    final list = messagesFor(user);
-    return list.isEmpty ? null : list.last;
+  String userId(String displayName) {
+    if (displayName == poster) return posterId;
+    if (displayName == applicant) return applicantId;
+    return displayName;
   }
 
-  bool isArchivedFor(String user) => _archived.contains(user);
+  String otherPerson(String user) {
+    final uid = userId(user);
+    return uid == posterId ? applicant : poster;
+  }
+
+  List<ChatMessage> messagesFor(String user) =>
+      messages.sublist(math.min(_cleared[userId(user)] ?? 0, messages.length));
+
+  ChatMessage? lastFor(String user) {
+    final visible = messagesFor(user);
+    return visible.isEmpty ? null : visible.last;
+  }
+
+  bool isArchivedFor(String user) => _archived.contains(userId(user));
 
   int unreadFor(String user) {
+    final uid = userId(user);
+    final start = math.max(_seen[uid] ?? 0, _cleared[uid] ?? 0);
     var count = 0;
-    final start = math.max(_seen[user] ?? 0, _cleared[user] ?? 0);
     for (var i = start; i < messages.length; i++) {
-      if (messages[i].from != user) count++;
+      if (messages[i].senderId != uid) count++;
     }
     return count;
   }
 
-  /// Returns true if something changed.
   bool markSeen(String user) {
-    final before = _seen[user] ?? 0;
+    final uid = userId(user);
+    final before = _seen[uid] ?? 0;
     if (before == messages.length) return false;
-    _seen[user] = messages.length;
+    _seen[uid] = messages.length;
     return true;
+  }
+
+  void replaceMessages(Iterable<ChatMessage> next) {
+    messages
+      ..clear()
+      ..addAll(next);
+  }
+
+  factory Conversation.fromFirestore(String id, Map<String, dynamic> data) {
+    final seen = _intMap(data['lastReadCount']);
+    final cleared = _intMap(data['clearedBefore']);
+    final archivedMap = data['archivedFor'];
+    return Conversation(
+      id: id,
+      jobId: data['jobId'] as String? ?? '',
+      jobTitle: data['jobTitle'] as String? ?? '',
+      poster: data['posterName'] as String? ?? '',
+      posterId: data['posterId'] as String? ?? '',
+      applicant: data['applicantName'] as String? ?? '',
+      applicantId: data['applicantId'] as String? ?? '',
+      seen: seen,
+      cleared: cleared,
+      archived: archivedMap is Map
+          ? archivedMap.entries
+                .where((entry) => entry.value == true)
+                .map((entry) => entry.key.toString())
+                .toSet()
+          : <String>{},
+    );
   }
 }
 
-/// Temporary storage for chats (kept in memory only).
-///
-/// TODO (backend): send and receive messages through the server in real
-/// time, and save archived and deleted chats per user. The screens only
-/// use the members below.
+Map<String, int> _intMap(Object? value) => value is Map
+    ? value.map(
+        (key, value) => MapEntry(key.toString(), value is int ? value : 0),
+      )
+    : {};
+
 class MessageStore extends ChangeNotifier {
   MessageStore._();
-  static final MessageStore instance = MessageStore._();
+  static final instance = MessageStore._();
 
-  final List<Conversation> _conversations = [];
+  String currentUserId = '';
+  String currentUserName = '';
+  final Map<String, Conversation> _conversations = {};
+  final List<StreamSubscription> _messageSubscriptions = [];
+  StreamSubscription<QuerySnapshot<Map<String, dynamic>>>? _conversationSub;
 
-  Conversation? byId(String id) {
-    for (final c in _conversations) {
-      if (c.id == id) return c;
+  void bindUser(String uid, {String displayName = ''}) {
+    if (currentUserId == uid && _conversationSub != null) {
+      currentUserName = displayName;
+      return;
     }
-    return null;
+    unawaited(_conversationSub?.cancel());
+    for (final subscription in _messageSubscriptions) {
+      unawaited(subscription.cancel());
+    }
+    _messageSubscriptions.clear();
+    _conversations.clear();
+    currentUserId = uid;
+    currentUserName = displayName;
+    notifyListeners();
+    if (uid.isEmpty) return;
+    _conversationSub = HabiFirebaseServices.instance.firestore
+        .collection('conversations')
+        .where('participantIds', arrayContains: uid)
+        .limit(100)
+        .snapshots()
+        .listen((snapshot) {
+          final liveIds = snapshot.docs.map((doc) => doc.id).toSet();
+          _conversations.removeWhere((id, _) => !liveIds.contains(id));
+          for (final doc in snapshot.docs) {
+            final conversation = _conversations[doc.id];
+            if (conversation == null) {
+              final created = Conversation.fromFirestore(doc.id, doc.data());
+              _conversations[doc.id] = created;
+              _watchMessages(created);
+            } else {
+              final updated = Conversation.fromFirestore(doc.id, doc.data());
+              _copyConversationState(conversation, updated);
+            }
+          }
+          notifyListeners();
+        });
   }
 
-  /// Opens the chat about [jobId] with [applicant], creating it if needed.
+  void _copyConversationState(Conversation target, Conversation source) {
+    target._seen
+      ..clear()
+      ..addAll(source._seen);
+    target._cleared
+      ..clear()
+      ..addAll(source._cleared);
+    target._archived
+      ..clear()
+      ..addAll(source._archived);
+  }
+
+  void _watchMessages(Conversation conversation) {
+    _messageSubscriptions.add(
+      HabiFirebaseServices.instance.firestore
+          .collection('conversations')
+          .doc(conversation.id)
+          .collection('messages')
+          .orderBy('createdAt')
+          .limit(500)
+          .snapshots()
+          .listen((snapshot) {
+            conversation.replaceMessages(
+              snapshot.docs.map(
+                (doc) => ChatMessage.fromFirestore(doc.id, doc.data()),
+              ),
+            );
+            notifyListeners();
+          }),
+    );
+  }
+
+  Conversation? byId(String id) => _conversations[id];
+
   Conversation startOrGet({
     required String jobId,
     required String jobTitle,
     required String poster,
+    required String posterId,
     required String applicant,
+    required String applicantId,
   }) {
-    final id = '$jobId|$applicant';
-    final existing = byId(id);
+    final resolvedPosterId = posterId;
+    final resolvedApplicantId = applicantId;
+    final id = '${jobId}_$resolvedApplicantId';
+    final existing = _conversations[id];
     if (existing != null) return existing;
     final created = Conversation(
       id: id,
       jobId: jobId,
       jobTitle: jobTitle,
       poster: poster,
+      posterId: resolvedPosterId,
       applicant: applicant,
+      applicantId: resolvedApplicantId,
     );
-    _conversations.add(created);
+    _conversations[id] = created;
+    _watchMessages(created);
+    unawaited(
+      _ensureConversation(created).catchError((Object error) {
+        debugPrint('Could not start HABI conversation: $error');
+      }),
+    );
+    notifyListeners();
     return created;
   }
 
-  /// Chats that have messages, newest first. Pass [archived] to get the
-  /// archived ones instead.
+  Future<void> _ensureConversation(Conversation conversation) async {
+    final ref = HabiFirebaseServices.instance.firestore
+        .collection('conversations')
+        .doc(conversation.id);
+    await ref.set({
+      'jobId': conversation.jobId,
+      'jobTitle': conversation.jobTitle,
+      'posterId': conversation.posterId,
+      'posterName': conversation.poster,
+      'applicantId': conversation.applicantId,
+      'applicantName': conversation.applicant,
+      'participantIds': [conversation.posterId, conversation.applicantId],
+      'createdAt': FieldValue.serverTimestamp(),
+      'lastMessageAt': FieldValue.serverTimestamp(),
+      'lastReadCount': <String, int>{},
+      'clearedBefore': <String, int>{},
+      'archivedFor': <String, bool>{},
+    }, SetOptions(merge: true));
+  }
+
   List<Conversation> forUser(String user, {bool archived = false}) {
-    final list = _conversations
+    final list = _conversations.values
         .where(
-          (c) =>
-              (c.poster == user || c.applicant == user) &&
-              c.messagesFor(user).isNotEmpty &&
-              c.isArchivedFor(user) == archived,
+          (conversation) =>
+              (conversation.posterId == currentUserId ||
+                  conversation.applicantId == currentUserId) &&
+              conversation.messagesFor(user).isNotEmpty &&
+              conversation.isArchivedFor(user) == archived,
         )
         .toList();
-    list.sort(
-      (a, b) => b.lastFor(user)!.time.compareTo(a.lastFor(user)!.time),
-    );
+    list.sort((a, b) => b.lastFor(user)!.time.compareTo(a.lastFor(user)!.time));
     return list;
   }
 
   int archivedCount(String user) => forUser(user, archived: true).length;
 
-  int unreadTotal(String user) {
-    var total = 0;
-    for (final c in _conversations) {
-      if (c.poster == user || c.applicant == user) {
-        total += c.unreadFor(user);
-      }
-    }
-    return total;
-  }
+  int unreadTotal(String _) => _conversations.values.fold(
+    0,
+    (total, conversation) => total + conversation.unreadFor(currentUserId),
+  );
 
-  void send(String conversationId, String from, String text) {
-    final conv = byId(conversationId);
+  Future<void> send(
+    String conversationId,
+    String senderName,
+    String text,
+  ) async {
+    final conversation = byId(conversationId);
     final body = text.trim();
-    if (conv == null || body.isEmpty) return;
-    conv.messages.add(
-      ChatMessage(from: from, text: body, time: DateTime.now()),
-    );
-    conv.markSeen(from);
-    // A new message brings the chat back for both people.
-    conv._archived.remove(from);
-    conv._archived.remove(conv.otherPerson(from));
-    final preview = body.length > 60 ? '${body.substring(0, 60)}...' : body;
-    NotificationStore.instance.add(
-      forUser: conv.otherPerson(from),
-      title: 'New message',
-      body: '$from: $preview',
-      kind: NotificationKind.message,
-      jobId: conv.jobId,
-      otherUser: from,
-      conversationId: conv.id,
-    );
-    notifyListeners();
+    if (conversation == null || body.isEmpty || currentUserId.isEmpty) return;
+    final db = HabiFirebaseServices.instance.firestore;
+    final conversationRef = db.collection('conversations').doc(conversationId);
+    final messageRef = conversationRef.collection('messages').doc();
+    final batch = db.batch();
+    batch.set(messageRef, {
+      'senderId': currentUserId,
+      'senderName': senderName,
+      'text': body,
+      'createdAt': FieldValue.serverTimestamp(),
+    });
+    batch.update(conversationRef, {
+      'lastMessageText': body.length > 300 ? body.substring(0, 300) : body,
+      'lastMessageSenderId': currentUserId,
+      'lastMessageAt': FieldValue.serverTimestamp(),
+      'archivedFor.${conversation.posterId}': false,
+      'archivedFor.${conversation.applicantId}': false,
+    });
+    await batch.commit();
   }
 
-  void markRead(String conversationId, String user) {
-    final conv = byId(conversationId);
-    if (conv != null && conv.markSeen(user)) notifyListeners();
-  }
-
-  void markAllRead(String user) {
-    var changed = false;
-    for (final c in _conversations) {
-      if ((c.poster == user || c.applicant == user) && c.markSeen(user)) {
-        changed = true;
-      }
+  Future<void> markRead(String conversationId, String user) async {
+    final conversation = byId(conversationId);
+    final uid = conversation?.userId(user) ?? currentUserId;
+    if (conversation == null || uid.isEmpty || !conversation.markSeen(uid)) {
+      return;
     }
-    if (changed) notifyListeners();
-  }
-
-  void archive(String conversationId, String user) {
-    final conv = byId(conversationId);
-    if (conv == null) return;
-    conv._archived.add(user);
+    await _conversationRef(conversationId)
+        .update({'lastReadCount.$uid': conversation.messages.length});
     notifyListeners();
   }
 
-  void unarchive(String conversationId, String user) {
-    final conv = byId(conversationId);
-    if (conv == null) return;
-    conv._archived.remove(user);
+  Future<void> markAllRead(String user) async {
+    final batch = HabiFirebaseServices.instance.firestore.batch();
+    var count = 0;
+    for (final conversation in _conversations.values) {
+      if (conversation.unreadFor(user) == 0) continue;
+      conversation.markSeen(user);
+      batch.update(_conversationRef(conversation.id), {
+        'lastReadCount.$currentUserId': conversation.messages.length,
+      });
+      count++;
+    }
+    if (count > 0) await batch.commit();
     notifyListeners();
   }
 
-  /// Deletes the chat for [user] only. The other person keeps their copy.
-  void delete(String conversationId, String user) {
-    final conv = byId(conversationId);
-    if (conv == null) return;
-    conv._cleared[user] = conv.messages.length;
-    conv._archived.remove(user);
-    conv.markSeen(user);
+  Future<void> archive(String conversationId, String _) =>
+      _conversationRef(conversationId)
+          .update({'archivedFor.$currentUserId': true});
+
+  Future<void> unarchive(String conversationId, String _) =>
+      _conversationRef(conversationId)
+          .update({'archivedFor.$currentUserId': false});
+
+  Future<void> delete(String conversationId, String _) async {
+    final conversation = byId(conversationId);
+    if (conversation == null) return;
+    conversation._cleared[currentUserId] = conversation.messages.length;
+    await _conversationRef(conversationId).update({
+      'clearedBefore.$currentUserId': conversation.messages.length,
+      'archivedFor.$currentUserId': false,
+      'lastReadCount.$currentUserId': conversation.messages.length,
+    });
     notifyListeners();
+  }
+
+  DocumentReference<Map<String, dynamic>> _conversationRef(String id) =>
+      HabiFirebaseServices.instance.firestore
+          .collection('conversations')
+          .doc(id);
+
+  Future<void> clear() async {
+    await _conversationSub?.cancel();
+    _conversationSub = null;
+    for (final subscription in _messageSubscriptions) {
+      await subscription.cancel();
+    }
+    _messageSubscriptions.clear();
+    _conversations.clear();
+    currentUserId = '';
+    currentUserName = '';
+    notifyListeners();
+  }
+
+  @override
+  void dispose() {
+    unawaited(_conversationSub?.cancel());
+    for (final subscription in _messageSubscriptions) {
+      unawaited(subscription.cancel());
+    }
+    super.dispose();
   }
 }

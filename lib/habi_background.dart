@@ -8,7 +8,7 @@ import 'habi_colors.dart';
 
 /// Responsive patterned backdrop with corner art placed independently of it.
 class HabiBackground extends StatelessWidget {
-  HabiBackground({super.key});
+  const HabiBackground({super.key});
 
   @override
   Widget build(BuildContext context) => AnimatedBuilder(

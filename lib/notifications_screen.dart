@@ -11,12 +11,25 @@ import 'notification_store.dart';
 
 /// Notifications: opens from the bell on the Home screen.
 class NotificationsScreen extends StatelessWidget {
-  NotificationsScreen({super.key, required this.userName});
+  const NotificationsScreen({super.key, required this.userName});
 
   final String userName;
 
-  void _open(BuildContext context, AppNotification n) {
-    NotificationStore.instance.markRead(n.id);
+  Future<void> _open(BuildContext context, AppNotification n) async {
+    try {
+      await NotificationStore.instance.markRead(n.id);
+    } catch (_) {
+      if (context.mounted) {
+        ScaffoldMessenger.of(context)
+          ..hideCurrentSnackBar()
+          ..showSnackBar(
+            const SnackBar(
+              content: Text('Could not mark this notification read.'),
+            ),
+          );
+      }
+    }
+    if (!context.mounted) return;
 
     if (n.kind == NotificationKind.status) {
       Navigator.of(context).push(
@@ -49,18 +62,34 @@ class NotificationsScreen extends StatelessWidget {
             jobTitle: job.title,
             poster: job.postedBy,
             applicant: other,
+            posterId: job.ownerId,
+            applicantId: n.otherUserId ?? MessageStore.instance.currentUserId,
           )
           .id;
     }
 
     Navigator.of(context).push(
       MaterialPageRoute(
-        builder: (_) => ChatScreen(
-          conversationId: conversationId!,
-          userName: userName,
-        ),
+        builder: (_) =>
+            ChatScreen(conversationId: conversationId!, userName: userName),
       ),
     );
+  }
+
+  Future<void> _markAllRead(BuildContext context) async {
+    try {
+      await NotificationStore.instance.markAllRead(userName);
+    } catch (_) {
+      if (context.mounted) {
+        ScaffoldMessenger.of(context)
+          ..hideCurrentSnackBar()
+          ..showSnackBar(
+            const SnackBar(
+              content: Text('Could not update notifications. Try again.'),
+            ),
+          );
+      }
+    }
   }
 
   IconData _icon(NotificationKind kind) {
@@ -88,7 +117,7 @@ class NotificationsScreen extends StatelessWidget {
         ),
         actions: [
           TextButton(
-            onPressed: () => NotificationStore.instance.markAllRead(userName),
+            onPressed: () => _markAllRead(context),
             style: TextButton.styleFrom(foregroundColor: HabiColors.gold),
             child: Text('Mark all read'),
           ),
@@ -183,7 +212,7 @@ class NotificationsScreen extends StatelessWidget {
                   ),
                   SizedBox(height: 6),
                   Text(
-                    formatTimeAgo(n.time),
+                    formatTimeAgo(n.time ?? DateTime.now()),
                     style: TextStyle(
                       fontSize: 12,
                       color: HabiColors.cream.withAlpha(150),
@@ -205,11 +234,7 @@ class NotificationsScreen extends StatelessWidget {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(
-              Icons.notifications_none,
-              color: HabiColors.gold,
-              size: 44,
-            ),
+            Icon(Icons.notifications_none, color: HabiColors.gold, size: 44),
             SizedBox(height: 12),
             Text(
               'No notifications yet',

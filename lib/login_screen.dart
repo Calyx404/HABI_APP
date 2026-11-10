@@ -1,17 +1,22 @@
 import 'package:flutter/material.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 
 import 'habi_background.dart';
 
 import 'account_store.dart';
+import 'backend/auth_service.dart';
 import 'employer_screen.dart';
 import 'employer_store.dart';
 import 'habi_colors.dart';
 import 'home_screen.dart';
+import 'job_store.dart';
+import 'message_store.dart';
+import 'notification_store.dart';
 import 'registration_role_screen.dart';
 
 /// Screen 2: Login (Welcome Back).
 class LoginScreen extends StatefulWidget {
-  LoginScreen({super.key});
+  const LoginScreen({super.key});
 
   @override
   State<LoginScreen> createState() => _LoginScreenState();
@@ -23,6 +28,7 @@ class _LoginScreenState extends State<LoginScreen> {
   final _passwordController = TextEditingController();
   bool _hidePassword = true;
   bool _rememberMe = false;
+  bool _isSigningIn = false;
 
   @override
   void dispose() {
@@ -43,44 +49,93 @@ class _LoginScreenState extends State<LoginScreen> {
       );
   }
 
-  void _logIn() {
+  Future<void> _logIn() async {
     if (!_formKey.currentState!.validate()) return;
-
-    // TODO (backend): log in on the server.
-    final account = AccountStore.instance.findByLoginId(_idController.text);
-    if (account == null) {
-      final employer = EmployerStore.instance.findByLoginId(_idController.text);
-      if (employer == null) {
-        _showMessage('No account found. Tap Create New Account to sign up.');
-        return;
-      }
-      if (employer.password != _passwordController.text) {
-        _showMessage('Incorrect password. Please try again.');
-        return;
-      }
-      Navigator.of(context).pushReplacement(
-        MaterialPageRoute<void>(
-          builder: (_) => EmployerScreen(companyName: employer.companyName),
-        ),
+    setState(() => _isSigningIn = true);
+    try {
+      final credential = await HabiAuthService.instance.signIn(
+        email: _idController.text,
+        password: _passwordController.text,
       );
-      return;
+      final user = credential.user;
+      if (user == null) throw StateError('Firebase returned no user session.');
+      final profile = await HabiAuthService.instance.userDocument(user.uid);
+      final data = profile.data();
+      final role = data?['role'] as String?;
+      JobStore.instance.bindUser(user.uid);
+      MessageStore.instance.bindUser(user.uid);
+      NotificationStore.instance.bindUser(user.uid);
+      if (role == HabiAccountRole.jobSeeker.name) {
+        await AccountStore.instance.load(user.uid);
+        final account = AccountStore.instance.current!;
+        JobStore.instance.bindUser(user.uid, displayName: account.displayName);
+        MessageStore.instance.bindUser(
+          user.uid,
+          displayName: account.displayName,
+        );
+        if (!mounted) return;
+        Navigator.of(context).pushAndRemoveUntil(
+          MaterialPageRoute<void>(
+            builder: (_) => HomeScreen(userName: account.displayName),
+          ),
+          (_) => false,
+        );
+      } else if (role == HabiAccountRole.employer.name) {
+        await EmployerStore.instance.load(user.uid);
+        final employer = EmployerStore.instance.byCompanyName(
+          data?['displayName'] as String? ?? '',
+        );
+        if (employer == null) throw StateError('Employer profile is missing.');
+        JobStore.instance.bindUser(user.uid, displayName: employer.companyName);
+        MessageStore.instance.bindUser(
+          user.uid,
+          displayName: employer.companyName,
+        );
+        if (!mounted) return;
+        Navigator.of(context).pushAndRemoveUntil(
+          MaterialPageRoute<void>(
+            builder: (_) => EmployerScreen(companyName: employer.companyName),
+          ),
+          (_) => false,
+        );
+      } else {
+        await HabiAuthService.instance.signOut();
+        throw StateError('This account has no valid HABI role.');
+      }
+    } on FirebaseAuthException catch (error) {
+      if (mounted) _showMessage(firebaseAuthMessage(error));
+    } on FirebaseException catch (error) {
+      if (mounted) {
+        _showMessage('Could not load your profile (${error.code}). Try again.');
+      }
+    } catch (error) {
+      if (mounted) _showMessage(error.toString());
+    } finally {
+      if (mounted) setState(() => _isSigningIn = false);
     }
-    if (account.password != _passwordController.text) {
-      _showMessage('Incorrect password. Please try again.');
-      return;
-    }
+  }
 
-    Navigator.of(context).pushReplacement(
-      MaterialPageRoute(
-        builder: (_) => HomeScreen(userName: account.displayName),
-      ),
-    );
+  Future<void> _sendPasswordReset() async {
+    final email = _idController.text.trim();
+    if (!RegExp(r'^[^@\s]+@[^@\s]+\.[^@\s]+$').hasMatch(email)) {
+      _showMessage('Enter a valid email address first.');
+      return;
+    }
+    try {
+      await HabiAuthService.instance.sendPasswordReset(email);
+      if (mounted) {
+        _showMessage('If an account uses that email, a reset link was sent.');
+      }
+    } on FirebaseAuthException catch (error) {
+      if (mounted) _showMessage(firebaseAuthMessage(error));
+    } catch (_) {
+      if (mounted) _showMessage('Could not send the reset email. Try again.');
+    }
   }
 
   void _createAccount() {
-    Navigator.of(context).push(
-      MaterialPageRoute(builder: (_) => RegistrationRoleScreen()),
-    );
+    Navigator.of(context)
+        .push(MaterialPageRoute(builder: (_) => RegistrationRoleScreen()));
   }
 
   InputDecoration _fieldDecoration({
@@ -89,9 +144,9 @@ class _LoginScreenState extends State<LoginScreen> {
     Widget? suffix,
   }) {
     OutlineInputBorder border(Color color) => OutlineInputBorder(
-          borderRadius: BorderRadius.circular(12),
-          borderSide: BorderSide(color: color, width: 1),
-        );
+      borderRadius: BorderRadius.circular(12),
+      borderSide: BorderSide(color: color, width: 1),
+    );
 
     return InputDecoration(
       labelText: label,
@@ -143,8 +198,7 @@ class _LoginScreenState extends State<LoginScreen> {
           SafeArea(
             child: Center(
               child: SingleChildScrollView(
-                padding:
-                    EdgeInsets.symmetric(horizontal: 28, vertical: 24),
+                padding: EdgeInsets.symmetric(horizontal: 28, vertical: 24),
                 child: Form(
                   key: _formKey,
                   child: Column(
@@ -196,18 +250,18 @@ class _LoginScreenState extends State<LoginScreen> {
                         style: TextStyle(color: HabiColors.cream),
                         cursorColor: HabiColors.gold,
                         decoration: _fieldDecoration(
-                          label: 'Email or Phone',
+                          label: 'Email address',
                           hint: 'you@example.com',
                         ),
                         validator: (v) {
                           final value = v?.trim() ?? '';
                           if (value.isEmpty) {
-                            return 'Enter your email or phone';
+                            return 'Enter your email address';
                           }
                           final isEmail = RegExp(r'^[^@\s]+@[^@\s]+\.[^@\s]+$')
                               .hasMatch(value);
-                          if (!isEmail && !isValidPhMobile(value)) {
-                            return 'Enter a valid email or phone number';
+                          if (!isEmail) {
+                            return 'Enter a valid email address';
                           }
                           return null;
                         },
@@ -275,9 +329,7 @@ class _LoginScreenState extends State<LoginScreen> {
                           ),
                           Spacer(),
                           TextButton(
-                            onPressed: () => _showMessage(
-                              'Password reset is coming soon.',
-                            ),
+                            onPressed: _sendPasswordReset,
                             style: TextButton.styleFrom(
                               padding: EdgeInsets.zero,
                               minimumSize: Size(0, 0),
@@ -297,7 +349,7 @@ class _LoginScreenState extends State<LoginScreen> {
                       SizedBox(
                         height: 52,
                         child: FilledButton(
-                          onPressed: _logIn,
+                          onPressed: _isSigningIn ? null : _logIn,
                           style: FilledButton.styleFrom(
                             backgroundColor: HabiColors.gold,
                             foregroundColor: HabiColors.ink,
@@ -309,7 +361,14 @@ class _LoginScreenState extends State<LoginScreen> {
                               fontWeight: FontWeight.w700,
                             ),
                           ),
-                          child: Text('Log In'),
+                          child: _isSigningIn
+                              ? const SizedBox.square(
+                                  dimension: 20,
+                                  child: CircularProgressIndicator(
+                                    strokeWidth: 2,
+                                  ),
+                                )
+                              : Text('Log In'),
                         ),
                       ),
                       SizedBox(height: 12),

@@ -18,7 +18,7 @@ final List<_SentMessage> _sent = [];
 
 /// Support: ask customer service or ask about the app.
 class SupportScreen extends StatefulWidget {
-  SupportScreen({super.key, required this.userName});
+  const SupportScreen({super.key, required this.userName});
 
   final String userName;
 

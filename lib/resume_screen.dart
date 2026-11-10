@@ -4,12 +4,11 @@ import 'package:flutter/material.dart';
 import 'habi_background.dart';
 
 import 'account_store.dart';
-import 'file_picker_initializer.dart';
 import 'form_widgets.dart';
 import 'habi_colors.dart';
 
 class ResumeScreen extends StatefulWidget {
-  ResumeScreen({super.key, required this.userName});
+  const ResumeScreen({super.key, required this.userName});
 
   final String userName;
 
@@ -25,39 +24,43 @@ class _ResumeScreenState extends State<ResumeScreen> {
   @override
   void initState() {
     super.initState();
-    initializeFilePickerForCurrentPlatform();
   }
 
   Future<void> _chooseResume() async {
     setState(() => _isPicking = true);
     try {
-      final result = await FilePicker.platform.pickFiles(
+      final file = await FilePicker.pickFile(
         dialogTitle: 'Choose a PDF resume',
         type: FileType.custom,
         allowedExtensions: const ['pdf'],
-        withData: true,
-        lockParentWindow: true,
+        windowsOptions: const WindowsOptions(lockParentWindow: true),
+        linuxOptions: const LinuxOptions(lockParentWindow: true),
       );
-      if (result == null || !mounted) return;
+      if (file == null || !mounted) return;
 
-      final file = result.files.single;
       if (!file.name.toLowerCase().endsWith('.pdf')) {
         showHabiSnack(context, 'Select a PDF file.');
         return;
       }
-      final bytes = file.bytes;
-      if (bytes == null || bytes.isEmpty) {
-        showHabiSnack(context, 'The selected PDF could not be read. Choose it again.');
+      final bytes = await file.readAsBytes();
+      if (!mounted) return;
+      if (bytes.isEmpty) {
+        showHabiSnack(
+          context,
+          'The selected PDF could not be read. Choose it again.',
+        );
         return;
       }
       final account = _account;
       if (account == null) {
-        showHabiSnack(context, 'Could not find this profile to save the resume.');
+        showHabiSnack(
+          context,
+          'Could not find this profile to save the resume.',
+        );
         return;
       }
-      account.resumeName = file.name;
-      account.resumeFileBytes = bytes;
-      AccountStore.instance.touch();
+      await AccountStore.instance.saveResume(name: file.name, bytes: bytes);
+      if (!mounted) return;
       showHabiSnack(context, '${file.name} saved to your profile.');
       setState(() {});
     } catch (error, stackTrace) {
@@ -73,14 +76,15 @@ class _ResumeScreenState extends State<ResumeScreen> {
     }
   }
 
-  void _removeResume() {
-    final account = _account;
-    if (account == null) return;
-    account.resumeName = '';
-    account.resumeFileBytes = null;
-    AccountStore.instance.touch();
-    setState(() {});
-    showHabiSnack(context, 'Resume removed from your profile.');
+  Future<void> _removeResume() async {
+    try {
+      await AccountStore.instance.removeResume();
+      if (!mounted) return;
+      setState(() {});
+      showHabiSnack(context, 'Resume removed from your profile.');
+    } catch (error) {
+      if (mounted) showHabiSnack(context, 'Could not remove the resume: $error');
+    }
   }
 
   @override
@@ -113,7 +117,7 @@ class _ResumeScreenState extends State<ResumeScreen> {
                   ),
                   SizedBox(height: 8),
                   Text(
-                    'Choose a PDF document. Your file is kept with this profile for the current app session.',
+                    'Choose a PDF document. It is stored privately with your profile.',
                     style: TextStyle(color: HabiColors.cream.withAlpha(200)),
                   ),
                   SizedBox(height: 20),
@@ -121,13 +125,29 @@ class _ResumeScreenState extends State<ResumeScreen> {
                     Card(
                       color: HabiColors.navyMid.withAlpha(240),
                       child: ListTile(
-                        leading: Icon(Icons.description_outlined, color: HabiColors.gold),
-                        title: Text(resumeName, style: TextStyle(color: HabiColors.cream), maxLines: 2, overflow: TextOverflow.ellipsis),
-                        subtitle: Text('Saved resume', style: TextStyle(color: HabiColors.cream.withAlpha(180))),
+                        leading: Icon(
+                          Icons.description_outlined,
+                          color: HabiColors.gold,
+                        ),
+                        title: Text(
+                          resumeName,
+                          style: TextStyle(color: HabiColors.cream),
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                        subtitle: Text(
+                          'Saved resume',
+                          style: TextStyle(
+                            color: HabiColors.cream.withAlpha(180),
+                          ),
+                        ),
                         trailing: IconButton(
                           tooltip: 'Remove resume',
                           onPressed: _removeResume,
-                          icon: Icon(Icons.delete_outline, color: HabiColors.cream),
+                          icon: Icon(
+                            Icons.delete_outline,
+                            color: HabiColors.cream,
+                          ),
                         ),
                       ),
                     ),
@@ -142,7 +162,11 @@ class _ResumeScreenState extends State<ResumeScreen> {
                               child: CircularProgressIndicator(strokeWidth: 2),
                             )
                           : Icon(Icons.upload_file_outlined),
-                      label: Text(resumeName.isEmpty ? 'Choose Resume File' : 'Replace Resume'),
+                      label: Text(
+                        resumeName.isEmpty
+                            ? 'Choose Resume File'
+                            : 'Replace Resume',
+                      ),
                       style: FilledButton.styleFrom(
                         backgroundColor: HabiColors.gold,
                         foregroundColor: HabiColors.ink,
@@ -153,7 +177,10 @@ class _ResumeScreenState extends State<ResumeScreen> {
                   Text(
                     'Supported format: PDF only',
                     textAlign: TextAlign.center,
-                    style: TextStyle(color: HabiColors.cream.withAlpha(170), fontSize: 12),
+                    style: TextStyle(
+                      color: HabiColors.cream.withAlpha(170),
+                      fontSize: 12,
+                    ),
                   ),
                 ],
               ),

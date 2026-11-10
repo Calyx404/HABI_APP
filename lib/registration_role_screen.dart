@@ -7,7 +7,7 @@ import 'employer_registration_screen.dart';
 import 'registration_screen.dart';
 
 class RegistrationRoleScreen extends StatelessWidget {
-  RegistrationRoleScreen({super.key});
+  const RegistrationRoleScreen({super.key});
 
   @override
   Widget build(BuildContext context) => Scaffold(

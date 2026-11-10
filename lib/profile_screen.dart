@@ -10,7 +10,7 @@ import 'resume_screen.dart';
 import 'settings_screen.dart';
 
 class ProfileScreen extends StatefulWidget {
-  ProfileScreen({super.key, required this.userName});
+  const ProfileScreen({super.key, required this.userName});
 
   final String userName;
 

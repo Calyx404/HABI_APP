@@ -10,7 +10,7 @@ import 'jobs_screen.dart';
 
 /// My Jobs: the jobs the person applied for or is taking.
 class MyJobsScreen extends StatelessWidget {
-  MyJobsScreen({super.key, required this.userName});
+  const MyJobsScreen({super.key, required this.userName});
 
   final String userName;
 

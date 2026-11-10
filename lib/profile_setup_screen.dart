@@ -84,7 +84,7 @@ const List<String> kTimesOfDay = [
 /// Profile setup: the extra information used to match jobs and
 /// accommodations. Everything here is optional.
 class ProfileSetupScreen extends StatefulWidget {
-  ProfileSetupScreen({
+  const ProfileSetupScreen({
     super.key,
     required this.userName,
     this.firstTime = false,
@@ -147,9 +147,9 @@ class _ProfileSetupScreenState extends State<ProfileSetupScreen> {
   }
 
   List<String> get _skillOptions => [
-        ...kCommonSkills,
-        ..._skills.where((s) => !kCommonSkills.contains(s)),
-      ];
+    ...kCommonSkills,
+    ..._skills.where((s) => !kCommonSkills.contains(s)),
+  ];
 
   void _addSkill() {
     final text = _skillInput.text.trim();
@@ -186,18 +186,14 @@ class _ProfileSetupScreenState extends State<ProfileSetupScreen> {
 
   void _goHome() {
     Navigator.of(context).pushAndRemoveUntil(
-      MaterialPageRoute(
-        builder: (_) => HomeScreen(userName: widget.userName),
-      ),
+      MaterialPageRoute(builder: (_) => HomeScreen(userName: widget.userName)),
       (route) => false,
     );
   }
 
-  void _save() {
+  Future<void> _save() async {
     final a = _account;
     if (a == null) return;
-    // TODO (backend): save the profile on the server. Keep the two "share"
-    // choices private unless the person turned them on.
     a.beneficiaryCategories = {..._beneficiary};
     a.shareBeneficiary = _shareBeneficiary;
     a.education = _education ?? '';
@@ -212,8 +208,19 @@ class _ProfileSetupScreenState extends State<ProfileSetupScreen> {
     a.shareAccessibility = _shareAccessibility;
     a.resumeName = _resume;
     a.profileDone = true;
-    AccountStore.instance.touch();
+    try {
+      await AccountStore.instance.saveCurrent();
+    } catch (error) {
+      if (mounted) {
+        showHabiSnack(
+          context,
+          'Could not save your profile. Please try again.',
+        );
+      }
+      return;
+    }
 
+    if (!mounted) return;
     if (widget.firstTime) {
       _goHome();
     } else {
@@ -321,7 +328,9 @@ class _ProfileSetupScreenState extends State<ProfileSetupScreen> {
                       onPressed: _goHome,
                       child: Text(
                         'Skip for now',
-                        style: TextStyle(color: HabiColors.cream.withAlpha(220)),
+                        style: TextStyle(
+                          color: HabiColors.cream.withAlpha(220),
+                        ),
                       ),
                     ),
                 ],
@@ -400,7 +409,8 @@ class _ProfileSetupScreenState extends State<ProfileSetupScreen> {
             SizedBox(height: 12),
             SwitchRow(
               label: 'Share with employers',
-              subtitle: 'Off by default. This stays private unless you turn '
+              subtitle:
+                  'Off by default. This stays private unless you turn '
                   'it on.',
               value: _shareBeneficiary,
               onChanged: (v) => setState(() => _shareBeneficiary = v),
@@ -447,7 +457,10 @@ class _ProfileSetupScreenState extends State<ProfileSetupScreen> {
                   onSubmitted: (_) => _addSkill(),
                   style: TextStyle(color: HabiColors.cream),
                   cursorColor: HabiColors.gold,
-                  decoration: habiDecoration('Add a skill', hint: 'e.g. Baking'),
+                  decoration: habiDecoration(
+                    'Add a skill',
+                    hint: 'e.g. Baking',
+                  ),
                 ),
               ),
               SizedBox(width: 10),
@@ -546,9 +559,8 @@ class _ProfileSetupScreenState extends State<ProfileSetupScreen> {
           Row(
             children: [
               TextButton(
-                onPressed: () => setState(
-                  () => _days = {'Mon', 'Tue', 'Wed', 'Thu', 'Fri'},
-                ),
+                onPressed: () =>
+                    setState(() => _days = {'Mon', 'Tue', 'Wed', 'Thu', 'Fri'}),
                 style: TextButton.styleFrom(foregroundColor: HabiColors.gold),
                 child: Text('Weekdays'),
               ),
@@ -581,7 +593,8 @@ class _ProfileSetupScreenState extends State<ProfileSetupScreen> {
     final showShare = _accessibility.any((a) => a != kNoAccommodation);
     return HabiCard(
       title: 'Accessibility requirements',
-      subtitle: 'Optional. Only tell us what you need at work. You never '
+      subtitle:
+          'Optional. Only tell us what you need at work. You never '
           'have to share a diagnosis.',
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -598,7 +611,8 @@ class _ProfileSetupScreenState extends State<ProfileSetupScreen> {
             SizedBox(height: 12),
             SwitchRow(
               label: 'Share with employers',
-              subtitle: 'Off by default. Employers only see this if you turn '
+              subtitle:
+                  'Off by default. Employers only see this if you turn '
                   'it on.',
               value: _shareAccessibility,
               onChanged: (v) => setState(() => _shareAccessibility = v),
@@ -621,8 +635,7 @@ class _ProfileSetupScreenState extends State<ProfileSetupScreen> {
               padding: EdgeInsets.only(bottom: 12),
               child: Row(
                 children: [
-                  Icon(Icons.description_outlined,
-                      color: HabiColors.gold),
+                  Icon(Icons.description_outlined, color: HabiColors.gold),
                   SizedBox(width: 10),
                   Expanded(
                     child: Text(

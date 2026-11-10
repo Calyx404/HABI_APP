@@ -1,32 +1,37 @@
+import 'dart:async';
+
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/foundation.dart';
-import 'dart:typed_data';
+
+import 'backend/auth_service.dart';
+import 'backend/storage_service.dart';
 
 /// The youngest age allowed to register.
-/// TODO: confirm the real minimum age with the team.
 const int kMinimumAge = 18;
 
-/// Turns "+63 917-123-4567" or "0917 123 4567" into "09171234567".
+/// Turns Philippine mobile numbers into a consistent local format.
 String normalizePhone(String input) {
   final cleaned = input.replaceAll(RegExp(r'[\s\-()]'), '');
   if (cleaned.startsWith('+63')) return '0${cleaned.substring(3)}';
   return cleaned;
 }
 
-/// A Philippine mobile number like 09171234567 or +639171234567.
 bool isValidPhMobile(String input) =>
     RegExp(r'^09\d{9}$').hasMatch(normalizePhone(input));
 
 int ageOn(DateTime birthDate, DateTime today) {
   var age = today.year - birthDate.year;
-  final hadBirthday = today.month > birthDate.month ||
+  final hadBirthday =
+      today.month > birthDate.month ||
       (today.month == birthDate.month && today.day >= birthDate.day);
   if (!hadBirthday) age--;
   return age;
 }
 
-/// A job seeker's account and profile.
 class Account {
   Account({
+    this.uid = '',
     required this.firstName,
     this.middleName = '',
     required this.lastName,
@@ -39,10 +44,10 @@ class Account {
     required this.address,
     required this.cityProvince,
     required this.barangay,
-    required this.password,
+    this.resumeStoragePath = '',
   });
 
-  // Sign-up information.
+  final String uid;
   final String firstName;
   final String middleName;
   final String lastName;
@@ -56,14 +61,7 @@ class Account {
   final String cityProvince;
   final String barangay;
 
-  /// TODO (backend): never keep a plain password. Send it to the server over
-  /// HTTPS and store only a secure hash there.
-  final String password;
-
-  // Profile setup (all optional).
   Set<String> beneficiaryCategories = {};
-
-  /// Private unless the person turns this on.
   bool shareBeneficiary = false;
   String education = '';
   Set<String> skills = {};
@@ -74,109 +72,222 @@ class Account {
   Set<String> availabilityDays = {};
   String availabilityTime = '';
   Set<String> accessibility = {};
-
-  /// Private unless the person turns this on.
   bool shareAccessibility = false;
   String resumeName = '';
+  String resumeStoragePath;
   Uint8List? resumeFileBytes;
   bool profileDone = false;
 
-  /// The name shown to other people, for example "Maria S. Santos Jr.".
   String get displayName {
     final middle = middleName.trim();
     final initial = middle.isEmpty ? '' : ' ${middle[0].toUpperCase()}.';
     final tail = suffix.trim().isEmpty ? '' : ' ${suffix.trim()}';
     return '${firstName.trim()}$initial ${lastName.trim()}$tail';
   }
+
+  factory Account.fromFirestore(Map<String, dynamic> data) {
+    final account =
+        Account(
+            uid: data['uid'] as String? ?? '',
+            firstName: data['firstName'] as String? ?? '',
+            middleName: data['middleName'] as String? ?? '',
+            lastName: data['lastName'] as String? ?? '',
+            suffix: data['suffix'] as String? ?? '',
+            birthDate:
+                (data['birthDate'] as Timestamp?)?.toDate() ?? DateTime(2000),
+            sex: data['sex'] as String? ?? '',
+            genderIdentity: data['genderIdentity'] as String? ?? '',
+            email: data['email'] as String? ?? '',
+            mobile: data['mobile'] as String? ?? '',
+            address: data['address'] as String? ?? '',
+            cityProvince: data['cityProvince'] as String? ?? '',
+            barangay: data['barangay'] as String? ?? '',
+            resumeStoragePath: data['resumeStoragePath'] as String? ?? '',
+          )
+          ..beneficiaryCategories = _stringSet(data['beneficiaryCategories'])
+          ..shareBeneficiary = data['shareBeneficiary'] as bool? ?? false
+          ..education = data['education'] as String? ?? ''
+          ..skills = _stringSet(data['skills'])
+          ..workExperience = data['workExperience'] as String? ?? ''
+          ..employmentType = data['employmentType'] as String? ?? ''
+          ..workArrangement = data['workArrangement'] as String? ?? ''
+          ..preferredLocation = data['preferredLocation'] as String? ?? ''
+          ..availabilityDays = _stringSet(data['availabilityDays'])
+          ..availabilityTime = data['availabilityTime'] as String? ?? ''
+          ..accessibility = _stringSet(data['accessibility'])
+          ..shareAccessibility = data['shareAccessibility'] as bool? ?? false
+          ..resumeName = data['resumeName'] as String? ?? ''
+          ..profileDone = data['profileDone'] as bool? ?? false;
+    return account;
+  }
+
+  Map<String, Object?> toPrivateMap() => {
+    'firstName': firstName,
+    'middleName': middleName,
+    'lastName': lastName,
+    'suffix': suffix,
+    'birthDate': Timestamp.fromDate(birthDate),
+    'sex': sex,
+    'genderIdentity': genderIdentity,
+    'email': email,
+    'mobile': mobile,
+    'address': address,
+    'cityProvince': cityProvince,
+    'barangay': barangay,
+    'beneficiaryCategories': beneficiaryCategories.toList(),
+    'shareBeneficiary': shareBeneficiary,
+    'education': education,
+    'skills': skills.toList(),
+    'workExperience': workExperience,
+    'employmentType': employmentType,
+    'workArrangement': workArrangement,
+    'preferredLocation': preferredLocation,
+    'availabilityDays': availabilityDays.toList(),
+    'availabilityTime': availabilityTime,
+    'accessibility': accessibility.toList(),
+    'shareAccessibility': shareAccessibility,
+    'resumeName': resumeName,
+    'resumeStoragePath': resumeStoragePath,
+    'profileDone': profileDone,
+  };
+
+  Map<String, Object?> toPublicProfileMap() => {
+    'displayName': displayName,
+    'education': education,
+    'skills': skills.toList(),
+    'workExperience': workExperience,
+    'employmentType': employmentType,
+    'workArrangement': workArrangement,
+    'preferredLocation': preferredLocation,
+    'availabilityDays': availabilityDays.toList(),
+    'availabilityTime': availabilityTime,
+    'beneficiaryCategories': shareBeneficiary
+        ? beneficiaryCategories.toList()
+        : const <String>[],
+    'accessibility': shareAccessibility
+        ? accessibility.toList()
+        : const <String>[],
+    'shareBeneficiary': shareBeneficiary,
+    'shareAccessibility': shareAccessibility,
+    'visibility': true,
+    'profileComplete': profileDone,
+  };
 }
 
-/// Temporary storage for accounts (kept in memory only).
-///
-/// TODO (backend): sign-up, login, duplicate checks, password hashing and
-/// saving the profile all belong on the server. The screens only use the
-/// members below.
+Set<String> _stringSet(Object? value) =>
+    (value is Iterable ? value.whereType<String>() : const <String>[]).toSet();
+
 class AccountStore extends ChangeNotifier {
   AccountStore._();
-  static final AccountStore instance = AccountStore._().._addTestAccounts();
+  static final instance = AccountStore._();
 
-  final List<Account> _accounts = [];
+  Account? _current;
+  Account? get current => _current;
 
-  // TEMP (test only): two accounts so the app can be tried without signing up
-  // every time. TODO: remove when real login exists.
-  void _addTestAccounts() {
-    _accounts.addAll([
-      Account(
-        firstName: 'Raymond',
-        lastName: 'Cruz',
-        birthDate: DateTime(1995, 5, 12),
-        sex: 'Male',
-        email: 'raymond@gmail.com',
-        mobile: '09171234567',
-        address: '12 Sample Street',
-        cityProvince: 'La Trinidad, Benguet',
-        barangay: 'Poblacion',
-        password: 'habi1234',
-      ),
-      Account(
-        firstName: 'Maria',
-        lastName: 'Santos',
-        birthDate: DateTime(1998, 8, 3),
-        sex: 'Female',
-        email: 'maria@gmail.com',
-        mobile: '09181234567',
-        address: '45 Sample Road',
-        cityProvince: 'Baguio City, Benguet',
-        barangay: 'Session Road',
-        password: 'habi1234',
-      ),
-    ]);
-  }
+  Account? byDisplayName(String name) =>
+      _current?.displayName == name ? _current : null;
 
-  Account? byDisplayName(String name) {
-    for (final a in _accounts) {
-      if (a.displayName == name) return a;
-    }
-    return null;
-  }
-
-  /// Finds an account by email or mobile number.
-  Account? findByLoginId(String id) {
-    final value = id.trim();
-    if (value.isEmpty) return null;
-    if (value.contains('@')) {
-      final email = value.toLowerCase();
-      for (final a in _accounts) {
-        if (a.email.toLowerCase() == email) return a;
-      }
+  Future<String?> register(Account account, {required String password}) async {
+    try {
+      final credential = await HabiAuthService.instance.createAccount(
+        email: account.email,
+        password: password,
+        role: HabiAccountRole.jobSeeker,
+        displayName: account.displayName,
+        privateProfile: account.toPrivateMap(),
+        roleProfile: account.toPublicProfileMap(),
+      );
+      final uid = credential.user?.uid;
+      if (uid == null) return 'Could not create the account. Please try again.';
+      _current = Account.fromFirestore({
+        ...account.toPrivateMap(),
+        'uid': uid,
+        'email': account.email,
+      });
+      notifyListeners();
       return null;
+    } on FirebaseAuthException catch (error) {
+      return firebaseAuthMessage(error);
+    } on FirebaseException catch (error) {
+      return 'Could not save your account (${error.code}). Please try again.';
     }
-    final phone = normalizePhone(value);
-    for (final a in _accounts) {
-      if (normalizePhone(a.mobile) == phone) return a;
-    }
-    return null;
   }
 
-  /// Returns an error message, or null when the account was created.
-  String? register(Account account) {
-    final email = account.email.trim().toLowerCase();
-    if (_accounts.any((a) => a.email.toLowerCase() == email)) {
-      return 'An account with this email already exists. Try logging in.';
+  Future<void> load(String uid) async {
+    final snapshot = await HabiAuthService.instance.userDocument(uid);
+    final data = snapshot.data();
+    if (!snapshot.exists || data == null || data['role'] != 'jobSeeker') {
+      throw StateError('The signed-in account is not a job-seeker profile.');
     }
-    final phone = normalizePhone(account.mobile);
-    if (_accounts.any((a) => normalizePhone(a.mobile) == phone)) {
-      return 'An account with this mobile number already exists.';
-    }
-    final name = account.displayName.toLowerCase();
-    if (_accounts.any((a) => a.displayName.toLowerCase() == name)) {
-      return 'Someone already uses the name ${account.displayName}. '
-          'Add your middle name so people can tell you apart.';
-    }
-    _accounts.add(account);
+    _current = Account.fromFirestore(data);
     notifyListeners();
-    return null;
   }
 
-  /// Call this after changing an account's profile fields.
-  void touch() => notifyListeners();
+  Future<void> saveCurrent() async {
+    final account = _current;
+    if (account == null) return;
+    await HabiAuthService.instance.saveUser(
+      account.uid,
+      account.toPrivateMap(),
+    );
+    await HabiAuthService.instance.saveSeekerProfile(
+      account.uid,
+      account.toPublicProfileMap(),
+    );
+    notifyListeners();
+  }
+
+  Future<void> saveResume({
+    required String name,
+    required Uint8List bytes,
+  }) async {
+    final account = _current;
+    if (account == null) throw StateError('No signed-in job-seeker profile.');
+    if (!name.toLowerCase().endsWith('.pdf') ||
+        bytes.isEmpty ||
+        bytes.length > 10 * 1024 * 1024) {
+      throw ArgumentError(
+        'Resume must be a non-empty PDF no larger than 10 MB.',
+      );
+    }
+    final path = await HabiStorageService.instance.uploadBytes(
+      path: 'resumes/${account.uid}/resume.pdf',
+      bytes: bytes,
+      contentType: 'application/pdf',
+    );
+    account.resumeName = name;
+    account.resumeStoragePath = path;
+    account.resumeFileBytes = bytes;
+    await saveCurrent();
+  }
+
+  Future<void> removeResume() async {
+    final account = _current;
+    if (account == null) return;
+    final path = account.resumeStoragePath;
+    if (path.isNotEmpty) await HabiStorageService.instance.delete(path);
+    account.resumeName = '';
+    account.resumeStoragePath = '';
+    account.resumeFileBytes = null;
+    await saveCurrent();
+  }
+
+  Future<Uint8List?> loadResume() async {
+    final account = _current;
+    final path = account?.resumeStoragePath ?? '';
+    if (path.isEmpty) return null;
+    final bytes = await HabiStorageService.instance.downloadBytes(path);
+    account!.resumeFileBytes = bytes;
+    return bytes;
+  }
+
+  /// Persists edits made by existing profile and settings forms.
+  void touch() {
+    unawaited(saveCurrent().catchError((Object _) {}));
+  }
+
+  Future<void> clear() async {
+    _current = null;
+    notifyListeners();
+  }
 }

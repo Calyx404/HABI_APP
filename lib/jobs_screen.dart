@@ -9,7 +9,7 @@ import 'job_store.dart';
 
 /// The Jobs tab: every posted job, with Active, Nearby and Saved tabs.
 class JobsScreen extends StatefulWidget {
-  JobsScreen({super.key, required this.userName, this.initialTab = 0});
+  const JobsScreen({super.key, required this.userName, this.initialTab = 0});
 
   final String userName;
   final int initialTab;

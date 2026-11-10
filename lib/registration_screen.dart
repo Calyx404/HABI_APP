@@ -3,6 +3,9 @@ import 'package:flutter/material.dart';
 import 'habi_background.dart';
 
 import 'account_store.dart';
+import 'job_store.dart';
+import 'message_store.dart';
+import 'notification_store.dart';
 import 'form_widgets.dart';
 import 'habi_colors.dart';
 import 'ph_locations.dart';
@@ -22,7 +25,7 @@ const List<String> kGenderIdentities = [
 
 /// Job Seeker Registration.
 class RegistrationScreen extends StatefulWidget {
-  RegistrationScreen({super.key});
+  const RegistrationScreen({super.key});
 
   @override
   State<RegistrationScreen> createState() => _RegistrationScreenState();
@@ -46,6 +49,7 @@ class _RegistrationScreenState extends State<RegistrationScreen> {
   String _suffix = 'None';
   String? _sex;
   String? _gender;
+  bool _isSubmitting = false;
   bool _hidePassword = true;
   bool _hideConfirm = true;
   bool _agreed = false;
@@ -110,7 +114,8 @@ class _RegistrationScreenState extends State<RegistrationScreen> {
     }
   }
 
-  void _submit() {
+  Future<void> _submit() async {
+    if (_isSubmitting) return;
     final valid = _formKey.currentState!.validate();
     if (!_agreed) setState(() => _consentError = true);
     if (!valid || !_agreed) return;
@@ -132,25 +137,40 @@ class _RegistrationScreenState extends State<RegistrationScreen> {
       address: _address.text.trim(),
       cityProvince: _location.text.trim(),
       barangay: _barangay.text.trim(),
-      password: _password.text,
     );
-
-    // TODO (backend): create the account on the server.
-    final error = AccountStore.instance.register(account);
-    if (error != null) {
-      showHabiSnack(context, error);
-      return;
-    }
-
-    Navigator.of(context).pushAndRemoveUntil(
-      MaterialPageRoute(
-        builder: (_) => ProfileSetupScreen(
-          userName: account.displayName,
-          firstTime: true,
+    setState(() => _isSubmitting = true);
+    try {
+      final error = await AccountStore.instance.register(
+        account,
+        password: _password.text,
+      );
+      if (error != null) {
+        if (mounted) showHabiSnack(context, error);
+        return;
+      }
+      final signedIn = AccountStore.instance.current!;
+      JobStore.instance.bindUser(
+        signedIn.uid,
+        displayName: signedIn.displayName,
+      );
+      MessageStore.instance.bindUser(
+        signedIn.uid,
+        displayName: signedIn.displayName,
+      );
+      NotificationStore.instance.bindUser(signedIn.uid);
+      if (!mounted) return;
+      Navigator.of(context).pushAndRemoveUntil(
+        MaterialPageRoute(
+          builder: (_) => ProfileSetupScreen(
+            userName: account.displayName,
+            firstTime: true,
+          ),
         ),
-      ),
-      (route) => false,
-    );
+        (route) => false,
+      );
+    } finally {
+      if (mounted) setState(() => _isSubmitting = false);
+    }
   }
 
   Widget _field({
@@ -368,7 +388,8 @@ class _RegistrationScreenState extends State<RegistrationScreen> {
                     _field(
                       controller: _password,
                       label: 'Password *',
-                      helper: 'At least 8 characters, with a letter and a '
+                      helper:
+                          'At least 8 characters, with a letter and a '
                           'number.',
                       obscure: _hidePassword,
                       suffix: IconButton(
@@ -463,9 +484,9 @@ class _RegistrationScreenState extends State<RegistrationScreen> {
 
   Widget _buildConsent() {
     void toggle() => setState(() {
-          _agreed = !_agreed;
-          if (_agreed) _consentError = false;
-        });
+      _agreed = !_agreed;
+      if (_agreed) _consentError = false;
+    });
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,

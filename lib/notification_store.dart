@@ -1,8 +1,12 @@
+import 'dart:async';
+
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/foundation.dart';
+
+import 'backend/firebase_services.dart';
 
 enum NotificationKind { application, status, message }
 
-/// "5 min ago", "2 h ago", "3 d ago".
 String formatTimeAgo(DateTime time) {
   final diff = DateTime.now().difference(time);
   if (diff.inMinutes < 1) return 'Just now';
@@ -20,8 +24,11 @@ class AppNotification {
     required this.kind,
     this.jobId,
     this.otherUser,
+    this.otherUserId,
     this.conversationId,
-  }) : time = DateTime.now();
+    this.time,
+    this.read = false,
+  });
 
   final String id;
   final String forUser;
@@ -30,74 +37,108 @@ class AppNotification {
   final NotificationKind kind;
   final String? jobId;
   final String? otherUser;
+  final String? otherUserId;
   final String? conversationId;
-  final DateTime time;
-  bool read = false;
+  final DateTime? time;
+  bool read;
+
+  factory AppNotification.fromFirestore(
+    String id,
+    Map<String, dynamic> data,
+    String uid,
+  ) => AppNotification(
+    id: id,
+    forUser: uid,
+    title: data['title'] as String? ?? '',
+    body: data['body'] as String? ?? '',
+    kind: NotificationKind.values.firstWhere(
+      (kind) => kind.name == data['kind'],
+      orElse: () => NotificationKind.status,
+    ),
+    jobId: data['jobId'] as String?,
+    otherUser: data['otherUserName'] as String?,
+    otherUserId: data['otherUserId'] as String?,
+    conversationId: data['conversationId'] as String?,
+    time: (data['createdAt'] as Timestamp?)?.toDate(),
+    read: data['read'] as bool? ?? false,
+  );
 }
 
-/// Temporary storage for notifications (kept in memory only).
-///
-/// TODO (backend): load notifications from the server and send push
-/// notifications to the phone. The screens only use the members below.
 class NotificationStore extends ChangeNotifier {
   NotificationStore._();
-  static final NotificationStore instance = NotificationStore._();
+  static final instance = NotificationStore._();
 
+  String _uid = '';
   final List<AppNotification> _items = [];
-  int _next = 0;
+  StreamSubscription<QuerySnapshot<Map<String, dynamic>>>? _subscription;
 
-  void add({
-    required String forUser,
-    required String title,
-    required String body,
-    required NotificationKind kind,
-    String? jobId,
-    String? otherUser,
-    String? conversationId,
-  }) {
-    if (forUser.isEmpty) return;
-    _next++;
-    _items.insert(
-      0,
-      AppNotification(
-        id: 'n$_next',
-        forUser: forUser,
-        title: title,
-        body: body,
-        kind: kind,
-        jobId: jobId,
-        otherUser: otherUser,
-        conversationId: conversationId,
-      ),
-    );
+  void bindUser(String uid) {
+    if (_uid == uid && _subscription != null) return;
+    unawaited(_subscription?.cancel());
+    _uid = uid;
+    _items.clear();
+    notifyListeners();
+    if (uid.isEmpty) return;
+    _subscription = HabiFirebaseServices.instance.firestore
+        .collection('users')
+        .doc(uid)
+        .collection('notifications')
+        .orderBy('createdAt', descending: true)
+        .limit(100)
+        .snapshots()
+        .listen((snapshot) {
+          _items
+            ..clear()
+            ..addAll(
+              snapshot.docs.map(
+                (doc) => AppNotification.fromFirestore(doc.id, doc.data(), uid),
+              ),
+            );
+          notifyListeners();
+        });
+  }
+
+  List<AppNotification> listFor(String _) => List.unmodifiable(_items);
+
+  int unreadCount(String _) => _items.where((item) => !item.read).length;
+
+  Future<void> markRead(String id) async {
+    if (_uid.isEmpty) return;
+    await HabiFirebaseServices.instance.firestore
+        .collection('users')
+        .doc(_uid)
+        .collection('notifications')
+        .doc(id)
+        .update({'read': true});
+  }
+
+  Future<void> markAllRead(String _) async {
+    if (_uid.isEmpty) return;
+    final batch = HabiFirebaseServices.instance.firestore.batch();
+    for (final item in _items.where((item) => !item.read)) {
+      batch.update(
+        HabiFirebaseServices.instance.firestore
+            .collection('users')
+            .doc(_uid)
+            .collection('notifications')
+            .doc(item.id),
+        {'read': true},
+      );
+    }
+    await batch.commit();
+  }
+
+  Future<void> clear() async {
+    await _subscription?.cancel();
+    _subscription = null;
+    _uid = '';
+    _items.clear();
     notifyListeners();
   }
 
-  /// Newest first.
-  List<AppNotification> listFor(String user) =>
-      _items.where((n) => n.forUser == user).toList();
-
-  int unreadCount(String user) =>
-      _items.where((n) => n.forUser == user && !n.read).length;
-
-  void markRead(String id) {
-    for (final n in _items) {
-      if (n.id == id && !n.read) {
-        n.read = true;
-        notifyListeners();
-        return;
-      }
-    }
-  }
-
-  void markAllRead(String user) {
-    var changed = false;
-    for (final n in _items) {
-      if (n.forUser == user && !n.read) {
-        n.read = true;
-        changed = true;
-      }
-    }
-    if (changed) notifyListeners();
+  @override
+  void dispose() {
+    unawaited(_subscription?.cancel());
+    super.dispose();
   }
 }

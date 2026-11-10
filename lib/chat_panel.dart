@@ -7,7 +7,7 @@ import 'notification_store.dart';
 /// The messages and the text box of a chat. Used by the full chat screen
 /// and by the half-height chat on the Job Details screen.
 class ChatPanel extends StatefulWidget {
-  ChatPanel({
+  const ChatPanel({
     super.key,
     required this.conversationId,
     required this.userName,
@@ -32,6 +32,7 @@ class _ChatPanelState extends State<ChatPanel> {
   final _controller = TextEditingController();
   final _scroll = ScrollController();
   bool _showQuick = true;
+  bool _isSending = false;
 
   @override
   void dispose() {
@@ -40,11 +41,30 @@ class _ChatPanelState extends State<ChatPanel> {
     super.dispose();
   }
 
-  void _send([String? preset]) {
+  Future<void> _send([String? preset]) async {
     final text = (preset ?? _controller.text).trim();
-    if (text.isEmpty) return;
-    MessageStore.instance.send(widget.conversationId, widget.userName, text);
-    if (preset == null) _controller.clear();
+    if (text.isEmpty || _isSending) return;
+    setState(() => _isSending = true);
+    try {
+      await MessageStore.instance.send(
+        widget.conversationId,
+        widget.userName,
+        text,
+      );
+      if (preset == null) _controller.clear();
+    } catch (_) {
+      if (mounted) {
+        ScaffoldMessenger.of(context)
+          ..hideCurrentSnackBar()
+          ..showSnackBar(
+            const SnackBar(
+              content: Text('Message could not be sent. Try again.'),
+            ),
+          );
+      }
+    } finally {
+      if (mounted) setState(() => _isSending = false);
+    }
   }
 
   @override
@@ -58,7 +78,12 @@ class _ChatPanelState extends State<ChatPanel> {
 
         if (conv.unreadFor(widget.userName) > 0) {
           WidgetsBinding.instance.addPostFrameCallback((_) {
-            MessageStore.instance.markRead(conv.id, widget.userName);
+            MessageStore.instance
+                .markRead(conv.id, widget.userName)
+                .catchError(
+                  (Object error) =>
+                      debugPrint('Could not mark chat as read: $error'),
+                );
           });
         }
         WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -77,7 +102,8 @@ class _ChatPanelState extends State<ChatPanel> {
                   ? Center(
                       child: SingleChildScrollView(
                         padding: EdgeInsets.all(16),
-                        child: widget.emptyState ??
+                        child:
+                            widget.emptyState ??
                             Text(
                               'No messages yet.',
                               style: TextStyle(
@@ -213,14 +239,19 @@ class _ChatPanelState extends State<ChatPanel> {
             width: 48,
             height: 48,
             child: FilledButton(
-              onPressed: _send,
+              onPressed: _isSending ? null : _send,
               style: FilledButton.styleFrom(
                 padding: EdgeInsets.zero,
                 backgroundColor: Color(0xFFE2BB6C),
                 foregroundColor: HabiColors.ink,
                 shape: CircleBorder(),
               ),
-              child: Icon(Icons.send, size: 22),
+              child: _isSending
+                  ? const SizedBox.square(
+                      dimension: 18,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    )
+                  : const Icon(Icons.send, size: 22),
             ),
           ),
         ],

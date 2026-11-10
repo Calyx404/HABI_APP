@@ -10,7 +10,7 @@ enum NavTab { home, jobs, message, profile }
 
 /// Bottom navigation bar shared by the main screens.
 class HabiNavBar extends StatelessWidget {
-  HabiNavBar({super.key, required this.userName, this.active});
+  const HabiNavBar({super.key, required this.userName, this.active});
 
   final String userName;
   final NavTab? active;

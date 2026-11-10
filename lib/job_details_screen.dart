@@ -9,7 +9,7 @@ import 'job_store.dart';
 
 /// Job Details.
 class JobDetailsScreen extends StatelessWidget {
-  JobDetailsScreen({
+  const JobDetailsScreen({
     super.key,
     required this.job,
     required this.userName,
@@ -72,9 +72,17 @@ class JobDetailsScreen extends StatelessWidget {
       ),
     );
     if (ok == true && context.mounted) {
-      // TODO (backend): send the application to the poster.
-      JobStore.instance.apply(j.id);
-      _message(context, 'Application sent.');
+      try {
+        await JobStore.instance.apply(j.id);
+        if (context.mounted) _message(context, 'Application submitted.');
+      } catch (_) {
+        if (context.mounted) {
+          _message(
+            context,
+            'Could not submit your application. Please try again.',
+          );
+        }
+      }
     }
   }
 
@@ -84,7 +92,7 @@ class JobDetailsScreen extends StatelessWidget {
       listenable: JobStore.instance,
       builder: (context, _) {
         final j = JobStore.instance.byId(job.id) ?? job;
-        final isOwner = j.postedBy == userName;
+        final isOwner = JobStore.instance.currentUser == j.ownerId;
         final applied = JobStore.instance.hasApplied(j.id);
         final saved = JobStore.instance.isSaved(j.id);
 
@@ -101,12 +109,23 @@ class JobDetailsScreen extends StatelessWidget {
             actions: [
               IconButton(
                 tooltip: saved ? 'Remove from saved' : 'Save job',
-                onPressed: () {
-                  JobStore.instance.toggleSave(j.id);
-                  _message(
-                    context,
-                    saved ? 'Removed from saved jobs.' : 'Job saved.',
-                  );
+                onPressed: () async {
+                  try {
+                    await JobStore.instance.toggleSave(j.id);
+                    if (context.mounted) {
+                      _message(
+                        context,
+                        saved ? 'Removed from saved jobs.' : 'Job saved.',
+                      );
+                    }
+                  } catch (_) {
+                    if (context.mounted) {
+                      _message(
+                        context,
+                        'Could not update saved jobs. Try again.',
+                      );
+                    }
+                  }
                 },
                 icon: Icon(
                   saved ? Icons.bookmark : Icons.bookmark_border,
@@ -132,12 +151,7 @@ class JobDetailsScreen extends StatelessWidget {
           bottomNavigationBar: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              _buildActions(
-                context,
-                j,
-                isOwner: isOwner,
-                applied: applied,
-              ),
+              _buildActions(context, j, isOwner: isOwner, applied: applied),
               HabiNavBar(userName: userName),
             ],
           ),
@@ -325,13 +339,8 @@ class JobDetailsScreen extends StatelessWidget {
       foregroundColor: HabiColors.ink,
       disabledBackgroundColor: HabiColors.cream.withAlpha(60),
       disabledForegroundColor: HabiColors.cream,
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(14),
-      ),
-      textStyle: TextStyle(
-        fontSize: 17,
-        fontWeight: FontWeight.w600,
-      ),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+      textStyle: TextStyle(fontSize: 17, fontWeight: FontWeight.w600),
     );
   }
 

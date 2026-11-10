@@ -1,12 +1,14 @@
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/foundation.dart';
 
-import 'dart:typed_data';
+import 'backend/auth_service.dart';
+import 'backend/storage_service.dart';
+import 'backend/firebase_services.dart';
 
-import 'account_store.dart';
-
-/// Employer details kept in memory for the current demo session.
 class EmployerAccount {
   const EmployerAccount({
+    this.uid = '',
     required this.companyName,
     required this.organizationType,
     required this.industry,
@@ -18,16 +20,17 @@ class EmployerAccount {
     required this.address,
     required this.city,
     required this.description,
-    required this.password,
     this.businessRegistrationType = '',
     this.businessRegistrationNumber = '',
     this.supportingDocumentName = '',
+    this.supportingDocumentStoragePath = '',
     this.supportingDocumentBytes,
     this.employerWebsite = '',
     this.verificationEmail = '',
     this.profileComplete = false,
   });
 
+  final String uid;
   final String companyName;
   final String organizationType;
   final String industry;
@@ -39,24 +42,74 @@ class EmployerAccount {
   final String address;
   final String city;
   final String description;
-  final String password;
   final String? businessRegistrationType;
   final String? businessRegistrationNumber;
   final String? supportingDocumentName;
+  final String? supportingDocumentStoragePath;
   final Uint8List? supportingDocumentBytes;
   final String? employerWebsite;
   final String? verificationEmail;
   final bool? profileComplete;
 
+  factory EmployerAccount.fromFirestore(Map<String, dynamic> data) =>
+      EmployerAccount(
+        uid: data['uid'] as String? ?? '',
+        companyName: data['companyName'] as String? ?? '',
+        organizationType: data['organizationType'] as String? ?? '',
+        industry: data['industry'] as String? ?? '',
+        email: data['email'] as String? ?? '',
+        contactFirstName: data['contactFirstName'] as String? ?? '',
+        contactLastName: data['contactLastName'] as String? ?? '',
+        position: data['position'] as String? ?? '',
+        phone: data['phone'] as String? ?? '',
+        address: data['address'] as String? ?? '',
+        city: data['city'] as String? ?? '',
+        description: data['description'] as String? ?? '',
+        businessRegistrationType:
+            data['businessRegistrationType'] as String? ?? '',
+        businessRegistrationNumber:
+            data['businessRegistrationNumber'] as String? ?? '',
+        supportingDocumentName: data['supportingDocumentName'] as String? ?? '',
+        supportingDocumentStoragePath:
+            data['supportingDocumentStoragePath'] as String? ?? '',
+        employerWebsite: data['employerWebsite'] as String? ?? '',
+        verificationEmail: data['verificationEmail'] as String? ?? '',
+        profileComplete: data['profileComplete'] as bool? ?? false,
+      );
+
+  Map<String, Object?> toFirestore() => {
+    'uid': uid,
+    'companyName': companyName,
+    'organizationType': organizationType,
+    'industry': industry,
+    'email': email,
+    'contactFirstName': contactFirstName,
+    'contactLastName': contactLastName,
+    'position': position,
+    'phone': phone,
+    'address': address,
+    'city': city,
+    'description': description,
+    'businessRegistrationType': businessRegistrationType,
+    'businessRegistrationNumber': businessRegistrationNumber,
+    'supportingDocumentName': supportingDocumentName,
+    'supportingDocumentStoragePath': supportingDocumentStoragePath,
+    'employerWebsite': employerWebsite,
+    'verificationEmail': verificationEmail,
+    'profileComplete': profileComplete ?? false,
+  };
+
   EmployerAccount copyWith({
     String? businessRegistrationType,
     String? businessRegistrationNumber,
     String? supportingDocumentName,
+    String? supportingDocumentStoragePath,
     Uint8List? supportingDocumentBytes,
     String? employerWebsite,
     String? verificationEmail,
     bool? profileComplete,
   }) => EmployerAccount(
+    uid: uid,
     companyName: companyName,
     organizationType: organizationType,
     industry: industry,
@@ -68,15 +121,15 @@ class EmployerAccount {
     address: address,
     city: city,
     description: description,
-    password: password,
     businessRegistrationType:
         businessRegistrationType ?? this.businessRegistrationType,
     businessRegistrationNumber:
         businessRegistrationNumber ?? this.businessRegistrationNumber,
     supportingDocumentName:
         supportingDocumentName ?? this.supportingDocumentName,
-    supportingDocumentBytes:
-        supportingDocumentBytes ?? this.supportingDocumentBytes,
+    supportingDocumentStoragePath:
+        supportingDocumentStoragePath ?? this.supportingDocumentStoragePath,
+    supportingDocumentBytes: supportingDocumentBytes,
     employerWebsite: employerWebsite ?? this.employerWebsite,
     verificationEmail: verificationEmail ?? this.verificationEmail,
     profileComplete: profileComplete ?? this.profileComplete,
@@ -85,18 +138,14 @@ class EmployerAccount {
 
 class EmployerStore extends ChangeNotifier {
   EmployerStore._();
-  static final EmployerStore instance = EmployerStore._();
+  static final instance = EmployerStore._();
 
-  final List<EmployerAccount> _accounts = [];
+  EmployerAccount? _current;
 
-  EmployerAccount? byCompanyName(String companyName) {
-    for (final account in _accounts) {
-      if (account.companyName == companyName) return account;
-    }
-    return null;
-  }
+  EmployerAccount? byCompanyName(String companyName) =>
+      _current?.companyName == companyName ? _current : null;
 
-  void updateProfile(
+  Future<void> updateProfile(
     String companyName, {
     required String businessRegistrationType,
     required String businessRegistrationNumber,
@@ -105,39 +154,94 @@ class EmployerStore extends ChangeNotifier {
     required String employerWebsite,
     required String verificationEmail,
     required bool profileComplete,
-  }) {
-    final index = _accounts.indexWhere(
-      (account) => account.companyName == companyName,
-    );
-    if (index == -1) return;
-    _accounts[index] = _accounts[index].copyWith(
+  }) async {
+    final account = byCompanyName(companyName);
+    if (account == null) return;
+    var storagePath = account.supportingDocumentStoragePath ?? '';
+    if (supportingDocumentBytes != null) {
+      storagePath = await HabiStorageService.instance.uploadBytes(
+        path: 'employer_documents/${account.uid}/business_registration',
+        bytes: supportingDocumentBytes,
+        contentType: _documentContentType(supportingDocumentName),
+      );
+    }
+    final updated = account.copyWith(
       businessRegistrationType: businessRegistrationType,
       businessRegistrationNumber: businessRegistrationNumber,
       supportingDocumentName: supportingDocumentName,
-      supportingDocumentBytes: supportingDocumentBytes,
+      supportingDocumentStoragePath: storagePath,
       employerWebsite: employerWebsite,
       verificationEmail: verificationEmail,
       profileComplete: profileComplete,
     );
+    await HabiFirebaseServices.instance.firestore
+        .collection('employer_profiles')
+        .doc(account.uid)
+        .set(updated.toFirestore(), SetOptions(merge: true));
+    await HabiAuthService.instance.saveUser(account.uid, {
+      'profileComplete': profileComplete,
+      'displayName': account.companyName,
+    });
+    _current = updated;
     notifyListeners();
   }
 
-  String? register(EmployerAccount account) {
-    final email = account.email.trim().toLowerCase();
-    if (AccountStore.instance.findByLoginId(email) != null ||
-        _accounts.any((saved) => saved.email.toLowerCase() == email)) {
-      return 'An account with this email already exists. Try logging in.';
+  Future<String?> register(
+    EmployerAccount account, {
+    required String password,
+  }) async {
+    try {
+      final credential = await HabiAuthService.instance.createAccount(
+        email: account.email,
+        password: password,
+        role: HabiAccountRole.employer,
+        displayName: account.companyName,
+        privateProfile: {
+          'phone': account.phone,
+          'companyName': account.companyName,
+        },
+        roleProfile: account.toFirestore(),
+      );
+      final uid = credential.user?.uid;
+      if (uid == null) return 'Could not create the account. Please try again.';
+      _current = EmployerAccount.fromFirestore({
+        ...account.toFirestore(),
+        'uid': uid,
+      });
+      notifyListeners();
+      return null;
+    } on FirebaseAuthException catch (error) {
+      return firebaseAuthMessage(error);
+    } on FirebaseException catch (error) {
+      return 'Could not save the employer account (${error.code}).';
     }
-    _accounts.add(account);
-    notifyListeners();
-    return null;
   }
 
-  EmployerAccount? findByLoginId(String id) {
-    final email = id.trim().toLowerCase();
-    for (final account in _accounts) {
-      if (account.email.toLowerCase() == email) return account;
+  Future<void> load(String uid) async {
+    final snapshot = await HabiFirebaseServices.instance.firestore
+        .collection('employer_profiles')
+        .doc(uid)
+        .get();
+    final data = snapshot.data();
+    if (!snapshot.exists || data == null) {
+      throw StateError('The signed-in account has no employer profile.');
     }
-    return null;
+    _current = EmployerAccount.fromFirestore(data);
+    notifyListeners();
   }
+
+  Future<void> clear() async {
+    _current = null;
+    notifyListeners();
+  }
+}
+
+String _documentContentType(String name) {
+  final extension = name.split('.').last.toLowerCase();
+  return switch (extension) {
+    'pdf' => 'application/pdf',
+    'png' => 'image/png',
+    'jpg' || 'jpeg' => 'image/jpeg',
+    _ => 'application/octet-stream',
+  };
 }

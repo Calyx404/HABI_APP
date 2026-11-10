@@ -3,11 +3,13 @@ import 'dart:typed_data';
 import 'package:flutter/material.dart';
 
 import 'habi_background.dart';
+
 import 'package:image_picker/image_picker.dart';
 
 import 'habi_appearance.dart';
 import 'habi_colors.dart';
 import 'login_screen.dart';
+import 'backend/session_controller.dart';
 import 'settings_feature_pages.dart';
 
 /// In-memory settings values for this UI prototype.
@@ -22,11 +24,7 @@ class HabiSettingsData {
 
 /// Shared avatar used by the profile and account settings screens.
 class HabiProfileAvatar extends StatelessWidget {
-  HabiProfileAvatar({
-    super.key,
-    required this.size,
-    this.imageBytes,
-  });
+  const HabiProfileAvatar({super.key, required this.size, this.imageBytes});
 
   final double size;
   final Uint8List? imageBytes;
@@ -46,23 +44,16 @@ class HabiProfileAvatar extends StatelessWidget {
           ? Image.memory(
               imageBytes!,
               fit: BoxFit.cover,
-              errorBuilder: (_, __, ___) => Icon(
-                Icons.person_outline,
-                color: HabiColors.cream,
-                size: 42,
-              ),
+              errorBuilder: (_, _, _) =>
+                  Icon(Icons.person_outline, color: HabiColors.cream, size: 42),
             )
-          : Icon(
-              Icons.person_outline,
-              color: HabiColors.cream,
-              size: 42,
-            ),
+          : Icon(Icons.person_outline, color: HabiColors.cream, size: 42),
     );
   }
 }
 
 class SettingsScreen extends StatelessWidget {
-  SettingsScreen({super.key, required this.userName});
+  const SettingsScreen({super.key, required this.userName});
 
   final String userName;
 
@@ -242,22 +233,18 @@ class SettingsScreen extends StatelessWidget {
         actions: [
           TextButton(
             onPressed: () => Navigator.of(dialogContext).pop(false),
-            child: Text(
-              'Cancel',
-              style: TextStyle(color: HabiColors.cream),
-            ),
+            child: Text('Cancel', style: TextStyle(color: HabiColors.cream)),
           ),
           TextButton(
             onPressed: () => Navigator.of(dialogContext).pop(true),
-            child: Text(
-              'Log Out',
-              style: TextStyle(color: HabiColors.gold),
-            ),
+            child: Text('Log Out', style: TextStyle(color: HabiColors.gold)),
           ),
         ],
       ),
     );
     if (shouldLogout == true && context.mounted) {
+      await HabiSessionController.instance.signOut();
+      if (!context.mounted) return;
       Navigator.of(context).pushAndRemoveUntil(
         MaterialPageRoute<void>(builder: (_) => LoginScreen()),
         (route) => false,
@@ -469,7 +456,7 @@ class _AccountSettingsPageState extends State<_AccountSettingsPage> {
     String? helper,
   }) => DropdownButtonFormField<String>(
     // Ignore blank or outdated values so Flutter doesn't assert on reopen.
-    value: options.contains(value) ? value : null,
+    initialValue: options.contains(value) ? value : null,
     dropdownColor: HabiColors.navyMid,
     style: TextStyle(color: HabiColors.cream),
     decoration: _decoration(label, helper: helper),
@@ -515,10 +502,7 @@ class _AccountSettingsPageState extends State<_AccountSettingsPage> {
                       _profileImageBytes == null
                           ? 'Add a photo so employers can recognize you.'
                           : 'You can change or remove this photo anytime.',
-                      style: TextStyle(
-                        color: HabiColors.tan,
-                        fontSize: 11,
-                      ),
+                      style: TextStyle(color: HabiColors.tan, fontSize: 11),
                     ),
                     SizedBox(height: 8),
                     Wrap(
@@ -828,7 +812,7 @@ class _EditProfilePageState extends State<_EditProfilePage> {
     ValueChanged<String?> onChanged,
   ) => DropdownButtonFormField<String>(
     // Ignore blank or outdated saved values so Flutter doesn't assert on reopen.
-    value: options.contains(value) ? value : null,
+    initialValue: options.contains(value) ? value : null,
     dropdownColor: HabiColors.navyMid,
     style: TextStyle(color: HabiColors.cream),
     decoration: _formDecoration(label),
@@ -906,10 +890,7 @@ class _EditProfilePageState extends State<_EditProfilePage> {
       children: [
         Text(
           'Profile for ${widget.userName}',
-          style: TextStyle(
-            color: HabiColors.gold,
-            fontWeight: FontWeight.w600,
-          ),
+          style: TextStyle(color: HabiColors.gold, fontWeight: FontWeight.w600),
         ),
         SizedBox(height: 18),
         _multiSelect(
@@ -1062,10 +1043,7 @@ class _FormShell extends StatelessWidget {
                   children: [
                     Text(
                       subtitle,
-                      style: TextStyle(
-                        color: HabiColors.tan,
-                        height: 1.4,
-                      ),
+                      style: TextStyle(color: HabiColors.tan, height: 1.4),
                     ),
                     SizedBox(height: 17),
                     child,
@@ -1111,28 +1089,28 @@ class _SettingsHeader extends StatelessWidget {
         ? HabiColors.cream
         : HabiColors.ink;
     return Padding(
-    padding: EdgeInsets.fromLTRB(10, 4, 18, 12),
-    child: Row(
-      children: [
-        IconButton(
-          onPressed: onBack,
-          icon: Icon(Icons.arrow_back, color: foreground),
-        ),
-        SizedBox(width: 3),
-        Expanded(
-          child: Text(
-            title,
-            style: TextStyle(
-              color: foreground,
-              fontSize: 20,
-              fontWeight: FontWeight.w700,
+      padding: EdgeInsets.fromLTRB(10, 4, 18, 12),
+      child: Row(
+        children: [
+          IconButton(
+            onPressed: onBack,
+            icon: Icon(Icons.arrow_back, color: foreground),
+          ),
+          SizedBox(width: 3),
+          Expanded(
+            child: Text(
+              title,
+              style: TextStyle(
+                color: foreground,
+                fontSize: 20,
+                fontWeight: FontWeight.w700,
+              ),
             ),
           ),
-        ),
-        Image.asset('assets/habi_logo.png', width: 32, height: 32),
-      ],
-    ),
-  );
+          Image.asset('assets/habi_logo.png', width: 32, height: 32),
+        ],
+      ),
+    );
   }
 }
 
@@ -1235,56 +1213,55 @@ class _SettingRow extends StatelessWidget {
     final secondary = HabiColors.tan;
     final accent = isDark ? HabiColors.gold : HabiColors.goldDark;
     return Container(
-    margin: EdgeInsets.only(bottom: 8),
-    decoration: BoxDecoration(
-      color: isDark
-          ? HabiColors.navyMid.withAlpha(245)
-          : Color(0xFFF3E4CF),
-      borderRadius: BorderRadius.circular(15),
-      border: Border.all(
-        color: isDark
-            ? HabiColors.cream.withAlpha(38)
-            : HabiColors.ink.withAlpha(45),
-      ),
-    ),
-    child: ListTile(
-      onTap: onTap,
-      contentPadding: EdgeInsets.symmetric(horizontal: 13, vertical: 2),
-      leading: Container(
-        width: 38,
-        height: 38,
-        decoration: BoxDecoration(
+      margin: EdgeInsets.only(bottom: 8),
+      decoration: BoxDecoration(
+        color: isDark ? HabiColors.navyMid.withAlpha(245) : Color(0xFFF3E4CF),
+        borderRadius: BorderRadius.circular(15),
+        border: Border.all(
           color: isDark
-              ? HabiColors.gold.withAlpha(30)
-              : HabiColors.ink.withAlpha(12),
-          borderRadius: BorderRadius.circular(12),
-        ),
-        child: Icon(icon, color: accent, size: 20),
-      ),
-      title: Text(
-        title,
-        style: TextStyle(
-          color: foreground,
-          fontWeight: FontWeight.w600,
-          fontSize: 12,
+              ? HabiColors.cream.withAlpha(38)
+              : HabiColors.ink.withAlpha(45),
         ),
       ),
-      subtitle: Padding(
-        padding: EdgeInsets.only(top: 4),
-        child: Text(
-          subtitle,
-          style: TextStyle(color: secondary, fontSize: 10),
+      child: ListTile(
+        onTap: onTap,
+        contentPadding: EdgeInsets.symmetric(horizontal: 13, vertical: 2),
+        leading: Container(
+          width: 38,
+          height: 38,
+          decoration: BoxDecoration(
+            color: isDark
+                ? HabiColors.gold.withAlpha(30)
+                : HabiColors.ink.withAlpha(12),
+            borderRadius: BorderRadius.circular(12),
+          ),
+          child: Icon(icon, color: accent, size: 20),
         ),
+        title: Text(
+          title,
+          style: TextStyle(
+            color: foreground,
+            fontWeight: FontWeight.w600,
+            fontSize: 12,
+          ),
+        ),
+        subtitle: Padding(
+          padding: EdgeInsets.only(top: 4),
+          child: Text(
+            subtitle,
+            style: TextStyle(color: secondary, fontSize: 10),
+          ),
+        ),
+        trailing:
+            trailingWidget ??
+            (trailing == null
+                ? Icon(Icons.chevron_right, color: accent, size: 19)
+                : Text(
+                    trailing!,
+                    style: TextStyle(color: secondary, fontSize: 10),
+                  )),
       ),
-      trailing: trailingWidget ??
-          (trailing == null
-              ? Icon(Icons.chevron_right, color: accent, size: 19)
-              : Text(
-              trailing!,
-              style: TextStyle(color: secondary, fontSize: 10),
-            )),
-    ),
-  );
+    );
   }
 }
 
@@ -1298,14 +1275,14 @@ class _AppearanceToggle extends StatefulWidget {
 class _AppearanceToggleState extends State<_AppearanceToggle> {
   @override
   Widget build(BuildContext context) => AnimatedBuilder(
-        animation: HabiAppearance.instance,
-        builder: (context, _) => Switch.adaptive(
-          value: HabiAppearance.instance.isDarkMode,
-          activeThumbColor: HabiColors.ink,
-          activeTrackColor: HabiColors.gold,
-          inactiveThumbColor: Colors.white,
-          inactiveTrackColor: Color(0xFF718096),
-          onChanged: HabiAppearance.instance.setDarkMode,
-        ),
-      );
+    animation: HabiAppearance.instance,
+    builder: (context, _) => Switch.adaptive(
+      value: HabiAppearance.instance.isDarkMode,
+      activeThumbColor: HabiColors.ink,
+      activeTrackColor: HabiColors.gold,
+      inactiveThumbColor: Colors.white,
+      inactiveTrackColor: Color(0xFF718096),
+      onChanged: HabiAppearance.instance.setDarkMode,
+    ),
+  );
 }

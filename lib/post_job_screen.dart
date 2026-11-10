@@ -16,7 +16,7 @@ const List<String> kExperienceOptions = [
 
 /// Post a Job form. Pass [job] to edit an existing job instead.
 class PostJobScreen extends StatefulWidget {
-  PostJobScreen({super.key, required this.userName, this.job});
+  const PostJobScreen({super.key, required this.userName, this.job});
 
   final String userName;
   final Job? job;

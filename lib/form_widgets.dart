@@ -99,7 +99,7 @@ Widget habiDropdown({
 }
 
 class SectionHeader extends StatelessWidget {
-  SectionHeader(this.title, {super.key, this.subtitle});
+  const SectionHeader(this.title, {super.key, this.subtitle});
 
   final String title;
   final String? subtitle;
@@ -138,7 +138,7 @@ class SectionHeader extends StatelessWidget {
 
 /// A rounded card with a title, used for each part of the profile setup.
 class HabiCard extends StatelessWidget {
-  HabiCard({
+  const HabiCard({
     super.key,
     required this.title,
     this.subtitle,
@@ -191,7 +191,7 @@ class HabiCard extends StatelessWidget {
 }
 
 class SwitchRow extends StatelessWidget {
-  SwitchRow({
+  const SwitchRow({
     super.key,
     required this.label,
     this.subtitle,
@@ -257,7 +257,7 @@ class SwitchRow extends StatelessWidget {
 /// Tap-to-select chips. Options in [exclusive] clear all the others when
 /// chosen, and choosing any other option removes them.
 class ChipMultiSelect extends StatelessWidget {
-  ChipMultiSelect({
+  const ChipMultiSelect({
     super.key,
     required this.options,
     required this.selected,

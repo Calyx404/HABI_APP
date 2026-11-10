@@ -28,7 +28,7 @@ String _formatDate(DateTime d) {
 
 /// My Applications: every job the person applied for, and its progress.
 class MyApplicationsScreen extends StatelessWidget {
-  MyApplicationsScreen({super.key, required this.userName});
+  const MyApplicationsScreen({super.key, required this.userName});
 
   final String userName;
 
@@ -38,24 +38,6 @@ class MyApplicationsScreen extends StatelessWidget {
         builder: (_) => JobDetailsScreen(job: job, userName: userName),
       ),
     );
-  }
-
-  // TEMP (test only): press and hold a card to change its status so every
-  // state can be seen. TODO (backend): remove this. The status should come
-  // from the person who posted the job.
-  void _cycleStatus(BuildContext context, Application a) {
-    final next = kAllStatuses[
-        (kAllStatuses.indexOf(a.status) + 1) % kAllStatuses.length];
-    JobStore.instance.setStatus(a.jobId, next);
-    ScaffoldMessenger.of(context)
-      ..hideCurrentSnackBar()
-      ..showSnackBar(
-        SnackBar(
-          content: Text('Status: $next (test only)'),
-          behavior: SnackBarBehavior.floating,
-          backgroundColor: HabiColors.navyLight,
-        ),
-      );
   }
 
   @override
@@ -102,7 +84,6 @@ class MyApplicationsScreen extends StatelessWidget {
                         application: a,
                         job: store.byId(a.jobId)!,
                         onTap: () => _openJob(context, store.byId(a.jobId)!),
-                        onLongPress: () => _cycleStatus(context, a),
                       ),
                   ],
                 );
@@ -122,11 +103,7 @@ class MyApplicationsScreen extends StatelessWidget {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(
-              Icons.description_outlined,
-              color: HabiColors.gold,
-              size: 44,
-            ),
+            Icon(Icons.description_outlined, color: HabiColors.gold, size: 44),
             SizedBox(height: 12),
             Text(
               'No applications yet',
@@ -155,8 +132,7 @@ class MyApplicationsScreen extends StatelessWidget {
               style: FilledButton.styleFrom(
                 backgroundColor: Color(0xFFE2BB6C),
                 foregroundColor: HabiColors.ink,
-                padding:
-                    EdgeInsets.symmetric(horizontal: 24, vertical: 14),
+                padding: EdgeInsets.symmetric(horizontal: 24, vertical: 14),
                 shape: RoundedRectangleBorder(
                   borderRadius: BorderRadius.circular(12),
                 ),
@@ -178,13 +154,11 @@ class _ApplicationCard extends StatelessWidget {
     required this.application,
     required this.job,
     required this.onTap,
-    required this.onLongPress,
   });
 
   final Application application;
   final Job job;
   final VoidCallback onTap;
-  final VoidCallback onLongPress;
 
   Color get _badgeColor {
     switch (application.status) {
@@ -252,7 +226,6 @@ class _ApplicationCard extends StatelessWidget {
     final stage = kStatusSteps.indexOf(application.status);
     return GestureDetector(
       onTap: onTap,
-      onLongPress: onLongPress,
       child: Container(
         width: double.infinity,
         margin: EdgeInsets.only(bottom: 12),
@@ -278,8 +251,7 @@ class _ApplicationCard extends StatelessWidget {
                   ),
                 ),
                 Container(
-                  padding:
-                      EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                  padding: EdgeInsets.symmetric(horizontal: 10, vertical: 4),
                   decoration: BoxDecoration(
                     color: _badgeColor,
                     borderRadius: BorderRadius.circular(8),
@@ -313,8 +285,7 @@ class _ApplicationCard extends StatelessWidget {
               Row(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  for (var i = 0; i < kStatusSteps.length; i++)
-                    _step(i, stage),
+                  for (var i = 0; i < kStatusSteps.length; i++) _step(i, stage),
                 ],
               ),
             ],

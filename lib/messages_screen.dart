@@ -10,7 +10,7 @@ import 'notification_store.dart';
 
 /// The Message tab: every chat between employers and applicants.
 class MessagesScreen extends StatefulWidget {
-  MessagesScreen({super.key, required this.userName});
+  const MessagesScreen({super.key, required this.userName});
 
   final String userName;
 
@@ -34,26 +34,45 @@ class _MessagesScreenState extends State<MessagesScreen> {
       );
   }
 
-  void _markAllRead() {
-    MessageStore.instance.markAllRead(widget.userName);
-    _snack('All messages marked as read.');
+  Future<void> _markAllRead() async {
+    try {
+      await MessageStore.instance.markAllRead(widget.userName);
+      if (mounted) _snack('All messages marked as read.');
+    } catch (_) {
+      if (mounted) _snack('Could not update messages. Try again.');
+    }
   }
 
-  void _archive(Conversation c) {
-    MessageStore.instance.archive(c.id, widget.userName);
-    _snack(
-      'Conversation archived.',
-      action: SnackBarAction(
-        label: 'Undo',
-        textColor: HabiColors.gold,
-        onPressed: () => MessageStore.instance.unarchive(c.id, widget.userName),
-      ),
-    );
+  Future<void> _archive(Conversation c) async {
+    try {
+      await MessageStore.instance.archive(c.id, widget.userName);
+      if (!mounted) return;
+      _snack(
+        'Conversation archived.',
+        action: SnackBarAction(
+          label: 'Undo',
+          textColor: HabiColors.gold,
+          onPressed: () async {
+            try {
+              await MessageStore.instance.unarchive(c.id, widget.userName);
+            } catch (_) {
+              if (mounted) _snack('Could not restore this conversation.');
+            }
+          },
+        ),
+      );
+    } catch (_) {
+      if (mounted) _snack('Could not archive this conversation. Try again.');
+    }
   }
 
-  void _unarchive(Conversation c) {
-    MessageStore.instance.unarchive(c.id, widget.userName);
-    _snack('Moved back to Messages.');
+  Future<void> _unarchive(Conversation c) async {
+    try {
+      await MessageStore.instance.unarchive(c.id, widget.userName);
+      if (mounted) _snack('Moved back to Messages.');
+    } catch (_) {
+      if (mounted) _snack('Could not restore this conversation. Try again.');
+    }
   }
 
   Future<void> _delete(Conversation c) async {
@@ -77,27 +96,27 @@ class _MessagesScreenState extends State<MessagesScreen> {
           ),
           TextButton(
             onPressed: () => Navigator.of(ctx).pop(true),
-            style: TextButton.styleFrom(
-              foregroundColor: Color(0xFFE5766B),
-            ),
+            style: TextButton.styleFrom(foregroundColor: Color(0xFFE5766B)),
             child: Text('Delete'),
           ),
         ],
       ),
     );
     if (ok == true && mounted) {
-      MessageStore.instance.delete(c.id, widget.userName);
-      _snack('Conversation deleted.');
+      try {
+        await MessageStore.instance.delete(c.id, widget.userName);
+        if (mounted) _snack('Conversation deleted.');
+      } catch (_) {
+        if (mounted) _snack('Could not delete this conversation. Try again.');
+      }
     }
   }
 
   void _open(Conversation c) {
     Navigator.of(context).push(
       MaterialPageRoute(
-        builder: (_) => ChatScreen(
-          conversationId: c.id,
-          userName: widget.userName,
-        ),
+        builder: (_) =>
+            ChatScreen(conversationId: c.id, userName: widget.userName),
       ),
     );
   }
@@ -143,10 +162,13 @@ class _MessagesScreenState extends State<MessagesScreen> {
               listenable: MessageStore.instance,
               builder: (context, _) {
                 final store = MessageStore.instance;
-                final chats =
-                    store.forUser(widget.userName, archived: _showArchived);
-                final archivedCount =
-                    _showArchived ? 0 : store.archivedCount(widget.userName);
+                final chats = store.forUser(
+                  widget.userName,
+                  archived: _showArchived,
+                );
+                final archivedCount = _showArchived
+                    ? 0
+                    : store.archivedCount(widget.userName);
                 if (chats.isEmpty && archivedCount == 0) return _buildEmpty();
                 return ListView(
                   padding: EdgeInsets.fromLTRB(20, 8, 20, 16),
@@ -185,7 +207,7 @@ class _MessagesScreenState extends State<MessagesScreen> {
     final text = _showArchived
         ? 'Chats you archive will show up here.'
         : 'Tap Send a Message on a job to message the employer. '
-            'If you posted a job, applicants will message you here.';
+              'If you posted a job, applicants will message you here.';
     return Center(
       child: Padding(
         padding: EdgeInsets.symmetric(horizontal: 32),
@@ -356,10 +378,7 @@ class _ChatTile extends StatelessWidget {
                     conversation.jobTitle,
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
-                    style: TextStyle(
-                      fontSize: 12,
-                      color: HabiColors.gold,
-                    ),
+                    style: TextStyle(fontSize: 12, color: HabiColors.gold),
                   ),
                   SizedBox(height: 4),
                   Row(
@@ -371,8 +390,9 @@ class _ChatTile extends StatelessWidget {
                           overflow: TextOverflow.ellipsis,
                           style: TextStyle(
                             fontSize: 14,
-                            fontWeight:
-                                unread > 0 ? FontWeight.w600 : FontWeight.w400,
+                            fontWeight: unread > 0
+                                ? FontWeight.w600
+                                : FontWeight.w400,
                             color: unread > 0
                                 ? HabiColors.cream
                                 : HabiColors.cream.withAlpha(200),

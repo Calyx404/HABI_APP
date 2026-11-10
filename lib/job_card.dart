@@ -8,12 +8,12 @@ import 'post_job_screen.dart';
 /// A job in a list. Tap to open it. The person who posted it also gets a
 /// menu with Edit and Delete.
 class JobCard extends StatelessWidget {
-  JobCard({super.key, required this.job, required this.userName});
+  const JobCard({super.key, required this.job, required this.userName});
 
   final Job job;
   final String userName;
 
-  bool get _isOwner => job.postedBy == userName;
+  bool get _isOwner => JobStore.instance.currentUser == job.ownerId;
 
   String? get _tag {
     if (JobStore.instance.hasApplied(job.id)) return 'Applied';
@@ -72,17 +72,21 @@ class JobCard extends StatelessWidget {
           ),
           TextButton(
             onPressed: () => Navigator.of(ctx).pop(true),
-            style: TextButton.styleFrom(
-              foregroundColor: Color(0xFFE5766B),
-            ),
+            style: TextButton.styleFrom(foregroundColor: Color(0xFFE5766B)),
             child: Text('Delete'),
           ),
         ],
       ),
     );
     if (ok == true && context.mounted) {
-      JobStore.instance.remove(job.id);
-      _message(context, 'Job deleted.');
+      try {
+        await JobStore.instance.remove(job.id);
+        if (context.mounted) _message(context, 'Job archived.');
+      } catch (_) {
+        if (context.mounted) {
+          _message(context, 'Could not archive this job. Please try again.');
+        }
+      }
     }
   }
 
@@ -117,8 +121,7 @@ class JobCard extends StatelessWidget {
                 ),
                 if (tag != null)
                   Container(
-                    padding:
-                        EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                    padding: EdgeInsets.symmetric(horizontal: 10, vertical: 4),
                     decoration: BoxDecoration(
                       color: HabiColors.goldDark,
                       borderRadius: BorderRadius.circular(8),
@@ -183,10 +186,7 @@ class JobCard extends StatelessWidget {
                 ),
                 Text(
                   'Posted by ${job.postedBy}',
-                  style: TextStyle(
-                    fontSize: 13,
-                    color: HabiColors.cream,
-                  ),
+                  style: TextStyle(fontSize: 13, color: HabiColors.cream),
                 ),
               ],
             ),

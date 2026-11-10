@@ -18,7 +18,7 @@ import 'support_screen.dart';
 
 /// Home / Dashboard.
 class HomeScreen extends StatefulWidget {
-  HomeScreen({super.key, required this.userName});
+  const HomeScreen({super.key, required this.userName});
 
   final String userName;
 
@@ -27,13 +27,6 @@ class HomeScreen extends StatefulWidget {
 }
 
 class _HomeScreenState extends State<HomeScreen> {
-  @override
-  void initState() {
-    super.initState();
-    // TODO (backend): replace with the signed-in user.
-    JobStore.instance.currentUser = widget.userName;
-  }
-
   String get _greeting {
     final hour = DateTime.now().hour;
     if (hour < 12) return 'Good morning';

@@ -1,0 +1,45 @@
+rules_version = '2';
+service firebase.storage {
+  match /b/{bucket}/o {
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function userRole(uid) {
+      return firestore.get(/databases/(default)/documents/users/$(uid)).data.role;
+    }
+
+    match /resumes/{uid}/{fileName} {
+      allow read, write: if signedIn() && request.auth.uid == uid
+        && (request.resource == null
+          || (request.resource.size <= 10 * 1024 * 1024
+            && request.resource.contentType == 'application/pdf'));
+    }
+
+    match /employer_documents/{uid}/{fileName} {
+      allow read, write: if signedIn()
+        && request.auth.uid == uid
+        && userRole(uid) == 'employer'
+        && (request.resource == null
+          || (request.resource.size <= 10 * 1024 * 1024
+            && request.resource.contentType in [
+              'application/pdf', 'image/png', 'image/jpeg'
+            ]));
+    }
+
+    match /application_resumes/{jobId}/{applicantId}/{fileName} {
+      function application() {
+        return firestore.get(/databases/(default)/documents/applications/$(jobId + '_' + applicantId)).data;
+      }
+      allow write: if signedIn()
+        && request.auth.uid == applicantId
+        && application().applicantId == applicantId
+        && (request.resource == null
+          || (request.resource.size <= 10 * 1024 * 1024
+            && request.resource.contentType == 'application/pdf'));
+      allow read: if signedIn()
+        && (request.auth.uid == applicantId
+          || application().employerId == request.auth.uid);
+    }
+  }
+}

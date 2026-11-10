@@ -31,14 +31,8 @@ class _EmployerScreenState extends State<EmployerScreen> {
     super.dispose();
   }
 
-  @override
-  void initState() {
-    super.initState();
-    JobStore.instance.currentUser = widget.companyName;
-  }
-
   List<Job> get _jobs => JobStore.instance.allJobs
-      .where((job) => job.postedBy == widget.companyName)
+      .where((job) => job.ownerId == JobStore.instance.currentUser)
       .toList();
 
   List<Job> get _publishedJobs => _jobs
@@ -1576,10 +1570,15 @@ class ApplicantDetailsScreen extends StatelessWidget {
   final Application application;
   final VoidCallback onStatusChanged;
 
-  void _changeStatus(BuildContext context, String status) {
-    JobStore.instance.setApplicationStatus(application, status);
-    onStatusChanged();
-    Navigator.of(context).pop();
+  Future<void> _changeStatus(BuildContext context, String status) async {
+    try {
+      await JobStore.instance.setApplicationStatus(application, status);
+      if (!context.mounted) return;
+      onStatusChanged();
+      Navigator.of(context).pop();
+    } catch (_) {
+      if (context.mounted) _showSaveError(context);
+    }
   }
 
   Future<void> _setInterviewSchedule(BuildContext context) async {
@@ -1610,24 +1609,36 @@ class ApplicantDetailsScreen extends StatelessWidget {
     final localizations = MaterialLocalizations.of(context);
     final dateLabel = localizations.formatMediumDate(scheduledAt);
     final timeLabel = localizations.formatTimeOfDay(time);
-    JobStore.instance.setApplicationStatus(
-      application,
-      'Interview',
-      notificationTitle: 'Interview scheduled',
-      notificationBody:
-          'Your interview for ${job.title} is scheduled for $dateLabel at $timeLabel.',
-    );
+    try {
+      await JobStore.instance.setApplicationStatus(
+        application,
+        'Interview',
+        notificationTitle: 'Interview scheduled',
+        notificationBody:
+            'Your interview for ${job.title} is scheduled for $dateLabel at $timeLabel.',
+      );
+    } catch (_) {
+      if (context.mounted) _showSaveError(context);
+      return;
+    }
+    if (!context.mounted) return;
     onStatusChanged();
     Navigator.of(context).pop();
   }
 
-  void _hireApplicant(BuildContext context) {
-    JobStore.instance.setApplicationStatus(
-      application,
-      'Hired',
-      notificationTitle: 'You have been hired!',
-      notificationBody: 'You have been hired for ${job.title}.',
-    );
+  Future<void> _hireApplicant(BuildContext context) async {
+    try {
+      await JobStore.instance.setApplicationStatus(
+        application,
+        'Hired',
+        notificationTitle: 'You have been hired!',
+        notificationBody: 'You have been hired for ${job.title}.',
+      );
+    } catch (_) {
+      if (context.mounted) _showSaveError(context);
+      return;
+    }
+    if (!context.mounted) return;
     onStatusChanged();
     Navigator.of(context).pop();
   }
@@ -1832,4 +1843,14 @@ class ApplicantDetailsScreen extends StatelessWidget {
       ],
     ),
   );
+}
+
+void _showSaveError(BuildContext context) {
+  ScaffoldMessenger.of(context)
+    ..hideCurrentSnackBar()
+    ..showSnackBar(
+      const SnackBar(
+        content: Text('Could not update this application. Try again.'),
+      ),
+    );
 }

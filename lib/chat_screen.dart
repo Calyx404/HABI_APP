@@ -8,7 +8,7 @@ import 'message_store.dart';
 
 /// The full-screen chat between an employer and an applicant.
 class ChatScreen extends StatelessWidget {
-  ChatScreen({
+  const ChatScreen({
     super.key,
     required this.conversationId,
     required this.userName,

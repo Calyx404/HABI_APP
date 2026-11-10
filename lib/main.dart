@@ -1,15 +1,29 @@
 import 'package:flutter/material.dart';
 
+import 'backend/auth_gate.dart';
+import 'backend/firebase_config.dart';
+import 'backend/firebase_services.dart';
+import 'backend/firebase_setup_screen.dart';
 import 'habi_appearance.dart';
 import 'habi_colors.dart';
-import 'splash_screen.dart';
 
-void main() {
-  runApp(HabiApp());
+Future<void> main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+  Object? firebaseError;
+  if (HabiFirebaseConfig.isConfigured) {
+    try {
+      await HabiFirebaseServices.instance.initialize();
+    } catch (error) {
+      firebaseError = error;
+    }
+  }
+  runApp(HabiApp(firebaseError: firebaseError));
 }
 
 class HabiApp extends StatelessWidget {
-  HabiApp({super.key});
+  const HabiApp({super.key, this.firebaseError});
+
+  final Object? firebaseError;
 
   @override
   Widget build(BuildContext context) {
@@ -22,8 +36,9 @@ class HabiApp extends StatelessWidget {
           debugShowCheckedModeBanner: false,
           theme: ThemeData(
             brightness: isDark ? Brightness.dark : Brightness.light,
-            scaffoldBackgroundColor:
-                isDark ? HabiColors.navy : Color(0xFFE8D5B9),
+            scaffoldBackgroundColor: isDark
+                ? HabiColors.navy
+                : Color(0xFFE8D5B9),
             colorScheme: isDark
                 ? ColorScheme.dark(
                     primary: HabiColors.gold,
@@ -35,7 +50,9 @@ class HabiApp extends StatelessWidget {
                   ),
             useMaterial3: true,
           ),
-          home: SplashScreen(),
+          home: firebaseError != null || !HabiFirebaseConfig.isConfigured
+              ? FirebaseSetupScreen(error: firebaseError)
+              : const HabiAuthGate(),
         );
       },
     );

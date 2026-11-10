@@ -5,7 +5,6 @@ import 'package:flutter/material.dart';
 
 import 'employer_screen.dart';
 import 'employer_store.dart';
-import 'file_picker_initializer.dart';
 import 'form_widgets.dart';
 import 'habi_background.dart';
 import 'habi_colors.dart';
@@ -52,7 +51,6 @@ class _EmployerProfileSetupScreenState
   @override
   void initState() {
     super.initState();
-    initializeFilePickerForCurrentPlatform();
     final account = _account;
     if (account != null) {
       _registrationNumber.text = account.businessRegistrationNumber ?? '';
@@ -79,16 +77,17 @@ class _EmployerProfileSetupScreenState
   Future<void> _chooseDocument() async {
     setState(() => _isPicking = true);
     try {
-      final result = await FilePicker.platform.pickFiles(
+      final file = await FilePicker.pickFile(
         dialogTitle: 'Choose a supporting business document',
         type: FileType.custom,
         allowedExtensions: const ['pdf', 'png', 'jpg', 'jpeg'],
-        withData: true,
-        lockParentWindow: true,
+        windowsOptions: const WindowsOptions(lockParentWindow: true),
+        linuxOptions: const LinuxOptions(lockParentWindow: true),
       );
-      if (result == null || !mounted) return;
-      final file = result.files.single;
-      if (file.bytes == null || file.bytes!.isEmpty) {
+      if (file == null || !mounted) return;
+      final bytes = await file.readAsBytes();
+      if (!mounted) return;
+      if (bytes.isEmpty) {
         showHabiSnack(
           context,
           'The selected file could not be read. Choose it again.',
@@ -97,7 +96,7 @@ class _EmployerProfileSetupScreenState
       }
       setState(() {
         _documentName = file.name;
-        _documentBytes = file.bytes;
+        _documentBytes = bytes;
       });
     } catch (error, stackTrace) {
       debugPrint('Business document picker failed: $error\n$stackTrace');
@@ -129,23 +128,29 @@ class _EmployerProfileSetupScreenState
     return null;
   }
 
-  void _save() {
+  Future<void> _save() async {
     if (!_formKey.currentState!.validate()) return;
     if (_registrationType == null) {
       showHabiSnack(context, 'Select a business registration type.');
       return;
     }
-    EmployerStore.instance.updateProfile(
-      widget.companyName,
-      businessRegistrationType: _registrationType!,
-      businessRegistrationNumber: _registrationNumber.text.trim(),
-      supportingDocumentName: _documentName,
-      supportingDocumentBytes: _documentBytes,
-      employerWebsite: _website.text.trim(),
-      verificationEmail: _verificationEmail.text.trim(),
-      profileComplete: true,
-    );
-    _finish();
+    try {
+      await EmployerStore.instance.updateProfile(
+        widget.companyName,
+        businessRegistrationType: _registrationType!,
+        businessRegistrationNumber: _registrationNumber.text.trim(),
+        supportingDocumentName: _documentName,
+        supportingDocumentBytes: _documentBytes,
+        employerWebsite: _website.text.trim(),
+        verificationEmail: _verificationEmail.text.trim(),
+        profileComplete: true,
+      );
+      if (mounted) _finish();
+    } catch (error) {
+      if (mounted) {
+        showHabiSnack(context, 'Could not save your business profile: $error');
+      }
+    }
   }
 
   void _skip() => _finish();

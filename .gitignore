@@ -28,6 +28,14 @@ migrate_working_dir/
 **/ios/Flutter/.last_build_id
 .dart_tool/
 .flutter-plugins-dependencies
+/config/firebase_options.json
+/firebase_options.dart
+/lib/firebase_options.dart
+/.firebase/
+/firebase-debug.log
+/firebase-debug.*.log
+/functions/node_modules/
+/functions/lib/
 .pub-cache/
 .pub/
 /build/

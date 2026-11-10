@@ -5,6 +5,9 @@ import 'habi_background.dart';
 import 'account_store.dart';
 import 'employer_profile_setup_screen.dart';
 import 'employer_store.dart';
+import 'job_store.dart';
+import 'message_store.dart';
+import 'notification_store.dart';
 import 'form_widgets.dart';
 import 'habi_colors.dart';
 import 'ph_locations.dart';
@@ -37,7 +40,7 @@ const _industries = [
 ];
 
 class EmployerRegistrationScreen extends StatefulWidget {
-  EmployerRegistrationScreen({super.key});
+  const EmployerRegistrationScreen({super.key});
 
   @override
   State<EmployerRegistrationScreen> createState() =>
@@ -64,6 +67,7 @@ class _EmployerRegistrationScreenState
   };
   String? _organizationType;
   String? _industry;
+  bool _isSubmitting = false;
   String? _city;
   bool _hidePassword = true;
   bool _hideConfirm = true;
@@ -142,7 +146,8 @@ class _EmployerRegistrationScreenState
     if (city != null && mounted) setState(() => _city = city);
   }
 
-  void _submit() {
+  Future<void> _submit() async {
+    if (_isSubmitting) return;
     if (!_formKey.currentState!.validate()) return;
     if (!_agreed) {
       setState(() => _consentError = true);
@@ -184,23 +189,39 @@ class _EmployerRegistrationScreenState
       address: _controllers['Company Address']!.text.trim(),
       city: _city!,
       description: _controllers['Company Description']!.text.trim(),
-      password: password,
     );
-    final error = EmployerStore.instance.register(account);
-    if (error != null) {
-      showHabiSnack(context, error);
-      return;
-    }
-
-    Navigator.of(context).pushAndRemoveUntil(
-      MaterialPageRoute<void>(
-        builder: (_) => EmployerProfileSetupScreen(
-          companyName: account.companyName,
-          isOnboarding: true,
+    setState(() => _isSubmitting = true);
+    try {
+      final error = await EmployerStore.instance.register(
+        account,
+        password: password,
+      );
+      if (error != null) {
+        if (mounted) showHabiSnack(context, error);
+        return;
+      }
+      final uid = EmployerStore.instance
+          .byCompanyName(account.companyName)
+          ?.uid;
+      if (uid == null || uid.isEmpty) {
+        throw StateError('The employer account was created without a user ID.');
+      }
+      JobStore.instance.bindUser(uid, displayName: account.companyName);
+      MessageStore.instance.bindUser(uid, displayName: account.companyName);
+      NotificationStore.instance.bindUser(uid);
+      if (!mounted) return;
+      Navigator.of(context).pushAndRemoveUntil(
+        MaterialPageRoute<void>(
+          builder: (_) => EmployerProfileSetupScreen(
+            companyName: account.companyName,
+            isOnboarding: true,
+          ),
         ),
-      ),
-      (route) => false,
-    );
+        (route) => false,
+      );
+    } finally {
+      if (mounted) setState(() => _isSubmitting = false);
+    }
   }
 
   Widget _dropdown({
@@ -345,8 +366,9 @@ class _EmployerRegistrationScreenState
                       if (text.isEmpty) return 'This field is required';
                       if (text.length < 8 ||
                           !RegExp(r'[A-Za-z]').hasMatch(text) ||
-                          !RegExp(r'\d').hasMatch(text))
+                          !RegExp(r'\d').hasMatch(text)) {
                         return 'Use at least 8 characters, with a letter and a number';
+                      }
                       return null;
                     },
                   ),

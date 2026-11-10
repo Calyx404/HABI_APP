@@ -17,7 +17,7 @@ class HabiSettingsPreferences {
 }
 
 class NotificationSettingsPage extends StatefulWidget {
-  NotificationSettingsPage({super.key});
+  const NotificationSettingsPage({super.key});
 
   @override
   State<NotificationSettingsPage> createState() => _NotificationPageState();
@@ -48,7 +48,7 @@ class _NotificationPageState extends State<NotificationSettingsPage> {
           style: TextStyle(color: HabiColors.tan, fontSize: 11),
         ),
         value: value,
-        activeColor: HabiColors.gold,
+        activeThumbColor: HabiColors.gold,
         onChanged: onChanged,
       ),
     );
@@ -113,7 +113,7 @@ class _NotificationPageState extends State<NotificationSettingsPage> {
 }
 
 class PrivacySecurityPage extends StatefulWidget {
-  PrivacySecurityPage({super.key});
+  const PrivacySecurityPage({super.key});
 
   @override
   State<PrivacySecurityPage> createState() => _PrivacyPageState();
@@ -154,7 +154,7 @@ class _PrivacyPageState extends State<PrivacySecurityPage> {
           style: TextStyle(color: HabiColors.tan, fontSize: 11),
         ),
         value: value,
-        activeColor: HabiColors.gold,
+        activeThumbColor: HabiColors.gold,
         onChanged: onChanged,
       ),
     );
@@ -219,7 +219,7 @@ class _PrivacyPageState extends State<PrivacySecurityPage> {
 }
 
 class LanguageSettingsPage extends StatefulWidget {
-  LanguageSettingsPage({super.key});
+  const LanguageSettingsPage({super.key});
 
   @override
   State<LanguageSettingsPage> createState() => _LanguagePageState();
@@ -235,34 +235,36 @@ class _LanguagePageState extends State<LanguageSettingsPage> {
         children: [
           const _Label('AVAILABLE LANGUAGES'),
           _Card(
-            child: Column(
-              children: [
-                for (final language in languages)
-                  RadioListTile<String>(
-                    value: language,
-                    groupValue: HabiSettingsPreferences.language,
-                    activeColor: HabiColors.gold,
-                    secondary: Icon(
-                      Icons.language,
-                      color: HabiColors.gold,
-                    ),
-                    title: Text(
-                      language,
-                      style: TextStyle(color: HabiColors.cream),
-                    ),
-                    onChanged: (value) {
-                      if (value == null) return;
-                      setState(() => HabiSettingsPreferences.language = value);
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        SnackBar(
-                          content: Text('$value selected.'),
-                          behavior: SnackBarBehavior.floating,
-                          backgroundColor: HabiColors.navyLight,
-                        ),
-                      );
-                    },
+            child: RadioGroup<String>(
+              groupValue: HabiSettingsPreferences.language,
+              onChanged: (value) {
+                if (value == null) return;
+                setState(() => HabiSettingsPreferences.language = value);
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(
+                    content: Text('$value selected.'),
+                    behavior: SnackBarBehavior.floating,
+                    backgroundColor: HabiColors.navyLight,
                   ),
-              ],
+                );
+              },
+              child: Column(
+                children: [
+                  for (final language in languages)
+                    RadioListTile<String>(
+                      value: language,
+                      activeColor: HabiColors.gold,
+                      secondary: Icon(
+                        Icons.language,
+                        color: HabiColors.gold,
+                      ),
+                      title: Text(
+                        language,
+                        style: TextStyle(color: HabiColors.cream),
+                      ),
+                    ),
+                ],
+              ),
             ),
           ),
           const _Note(
@@ -273,7 +275,7 @@ class _LanguagePageState extends State<LanguageSettingsPage> {
 }
 
 class HelpSupportPage extends StatefulWidget {
-  HelpSupportPage({super.key});
+  const HelpSupportPage({super.key});
 
   @override
   State<HelpSupportPage> createState() => _HelpPageState();
@@ -363,7 +365,7 @@ class _HelpPageState extends State<HelpSupportPage> {
 }
 
 class AboutHabiPage extends StatelessWidget {
-  AboutHabiPage({super.key});
+  const AboutHabiPage({super.key});
 
   void showInfo(BuildContext context, String title, String text) {
     showDialog<void>(

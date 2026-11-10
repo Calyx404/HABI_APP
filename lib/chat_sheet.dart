@@ -15,7 +15,9 @@ Future<void> showChatSheet(
     jobId: job.id,
     jobTitle: job.title,
     poster: job.postedBy,
+    posterId: job.ownerId,
     applicant: userName,
+    applicantId: MessageStore.instance.currentUserId,
   );
 
   return showModalBottomSheet<void>(
