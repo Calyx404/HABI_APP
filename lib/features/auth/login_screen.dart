@@ -6,9 +6,10 @@ import 'package:habi/shared/theme/habi_background.dart';
 import 'package:habi/data/account_store.dart';
 import 'package:habi/backend/auth_service.dart';
 import 'package:habi/features/employer/employer_screen.dart';
+import 'package:habi/features/admin/admin_screen.dart';
 import 'package:habi/data/employer_store.dart';
 import 'package:habi/shared/theme/habi_colors.dart';
-import 'package:habi/features/home/home_screen.dart';
+import 'package:habi/features/home/job_seeker_shell.dart';
 import 'package:habi/data/job_store.dart';
 import 'package:habi/data/message_store.dart';
 import 'package:habi/data/notification_store.dart';
@@ -59,16 +60,41 @@ class _LoginScreenState extends State<LoginScreen> {
       );
       final user = credential.user;
       if (user == null) throw StateError('Firebase returned no user session.');
+      final token = await user.getIdTokenResult();
       final profile = await HabiAuthService.instance.userDocument(user.uid);
       final data = profile.data();
-      final role = data?['role'] as String?;
-      JobStore.instance.bindUser(user.uid);
+      if (data == null) {
+        throw StateError('Your HABI account profile is missing.');
+      }
+      if (data['accountStatus'] == 'suspended') {
+        await HabiAuthService.instance.signOut();
+        if (mounted) {
+          _showMessage(
+            'Your account is currently suspended. Contact HABI support.',
+          );
+        }
+        return;
+      }
+      await HabiAuthService.instance.ensureAdminDirectoryEntry(user.uid, data);
+      if (token.claims?['admin'] == true) {
+        if (!mounted) return;
+        Navigator.of(context).pushAndRemoveUntil(
+          MaterialPageRoute<void>(builder: (_) => const AdminScreen()),
+          (_) => false,
+        );
+        return;
+      }
+      final role = data['role'] as String?;
       MessageStore.instance.bindUser(user.uid);
       NotificationStore.instance.bindUser(user.uid);
       if (role == HabiAccountRole.jobSeeker.name) {
         await AccountStore.instance.load(user.uid);
         final account = AccountStore.instance.current!;
-        JobStore.instance.bindUser(user.uid, displayName: account.displayName);
+        JobStore.instance.bindUser(
+          user.uid,
+          displayName: account.displayName,
+          asEmployer: false,
+        );
         MessageStore.instance.bindUser(
           user.uid,
           displayName: account.displayName,
@@ -76,17 +102,21 @@ class _LoginScreenState extends State<LoginScreen> {
         if (!mounted) return;
         Navigator.of(context).pushAndRemoveUntil(
           MaterialPageRoute<void>(
-            builder: (_) => HomeScreen(userName: account.displayName),
+            builder: (_) => JobSeekerShell(userName: account.displayName),
           ),
           (_) => false,
         );
       } else if (role == HabiAccountRole.employer.name) {
         await EmployerStore.instance.load(user.uid);
         final employer = EmployerStore.instance.byCompanyName(
-          data?['displayName'] as String? ?? '',
+          data['displayName'] as String? ?? '',
         );
         if (employer == null) throw StateError('Employer profile is missing.');
-        JobStore.instance.bindUser(user.uid, displayName: employer.companyName);
+        JobStore.instance.bindUser(
+          user.uid,
+          displayName: employer.companyName,
+          asEmployer: true,
+        );
         MessageStore.instance.bindUser(
           user.uid,
           displayName: employer.companyName,

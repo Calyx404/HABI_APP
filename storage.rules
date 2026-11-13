@@ -17,7 +17,10 @@ service firebase.storage {
     }
 
     match /employer_documents/{uid}/{fileName} {
-      allow read, write: if signedIn()
+      allow read: if signedIn()
+        && ((request.auth.uid == uid && userRole(uid) == 'employer')
+          || request.auth.token.admin == true);
+      allow write: if signedIn()
         && request.auth.uid == uid
         && userRole(uid) == 'employer'
         && (request.resource == null
@@ -31,15 +34,33 @@ service firebase.storage {
       function application() {
         return firestore.get(/databases/(default)/documents/applications/$(jobId + '_' + applicantId)).data;
       }
-      allow write: if signedIn()
+      function applicationExists() {
+        return firestore.exists(/databases/(default)/documents/applications/$(jobId + '_' + applicantId));
+      }
+      function submittedPathMatches() {
+        return applicationExists()
+          && application().resumeStoragePath
+            == 'application_resumes/' + jobId + '/' + applicantId + '/' + fileName;
+      }
+      function jobIsPublished() {
+        return firestore.exists(/databases/(default)/documents/jobs/$(jobId))
+          && firestore.get(/databases/(default)/documents/jobs/$(jobId)).data.status == 'published';
+      }
+      allow create: if signedIn()
         && request.auth.uid == applicantId
-        && application().applicantId == applicantId
-        && (request.resource == null
-          || (request.resource.size <= 10 * 1024 * 1024
-            && request.resource.contentType == 'application/pdf'));
+        && userRole(applicantId) == 'jobSeeker'
+        && jobIsPublished()
+        && fileName.matches('^[0-9]+\\.pdf$')
+        && request.resource.size > 0
+        && request.resource.size <= 10 * 1024 * 1024
+        && request.resource.contentType == 'application/pdf'
+        && resource == null;
+      allow update, delete: if false;
       allow read: if signedIn()
+        && submittedPathMatches()
         && (request.auth.uid == applicantId
-          || application().employerId == request.auth.uid);
+          || (userRole(request.auth.uid) == 'employer'
+            && application().employerId == request.auth.uid));
     }
   }
 }

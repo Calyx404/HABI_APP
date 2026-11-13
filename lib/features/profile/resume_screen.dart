@@ -1,11 +1,8 @@
-import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 
-import 'package:habi/shared/theme/habi_background.dart';
-
 import 'package:habi/data/account_store.dart';
-import 'package:habi/shared/widgets/form_widgets.dart';
 import 'package:habi/shared/theme/habi_colors.dart';
+import 'package:habi/shared/widgets/form_widgets.dart';
 
 class ResumeScreen extends StatefulWidget {
   const ResumeScreen({super.key, required this.userName});
@@ -17,177 +14,60 @@ class ResumeScreen extends StatefulWidget {
 }
 
 class _ResumeScreenState extends State<ResumeScreen> {
-  bool _isPicking = false;
+  bool _saving = false;
 
   Account? get _account => AccountStore.instance.byDisplayName(widget.userName);
 
-  @override
-  void initState() {
-    super.initState();
-  }
-
-  Future<void> _chooseResume() async {
-    setState(() => _isPicking = true);
-    try {
-      final file = await FilePicker.pickFile(
-        dialogTitle: 'Choose a PDF resume',
-        type: FileType.custom,
-        allowedExtensions: const ['pdf'],
-        windowsOptions: const WindowsOptions(lockParentWindow: true),
-        linuxOptions: const LinuxOptions(lockParentWindow: true),
-      );
-      if (file == null || !mounted) return;
-
-      if (!file.name.toLowerCase().endsWith('.pdf')) {
-        showHabiSnack(context, 'Select a PDF file.');
-        return;
-      }
-      final bytes = await file.readAsBytes();
-      if (!mounted) return;
-      if (bytes.isEmpty) {
-        showHabiSnack(
-          context,
-          'The selected PDF could not be read. Choose it again.',
-        );
-        return;
-      }
-      final account = _account;
-      if (account == null) {
-        showHabiSnack(
-          context,
-          'Could not find this profile to save the resume.',
-        );
-        return;
-      }
-      await AccountStore.instance.saveResume(name: file.name, bytes: bytes);
-      if (!mounted) return;
-      showHabiSnack(context, '${file.name} saved to your profile.');
-      setState(() {});
-    } catch (error, stackTrace) {
-      debugPrint('Resume PDF picker failed: $error\n$stackTrace');
-      if (mounted) {
-        showHabiSnack(
-          context,
-          'Could not open the PDF picker (${error.runtimeType}). Fully restart the app and try again.',
-        );
-      }
-    } finally {
-      if (mounted) setState(() => _isPicking = false);
-    }
-  }
-
-  Future<void> _removeResume() async {
+  Future<void> _removeLegacyResume() async {
+    setState(() => _saving = true);
     try {
       await AccountStore.instance.removeResume();
-      if (!mounted) return;
-      setState(() {});
-      showHabiSnack(context, 'Resume removed from your profile.');
-    } catch (error) {
-      if (mounted) {
-        showHabiSnack(context, 'Could not remove the resume: $error');
-      }
+      if (mounted) showHabiSnack(context, 'Saved resume reference removed.');
+    } catch (_) {
+      if (mounted) showHabiSnack(context, 'Could not update your profile.');
+    } finally {
+      if (mounted) setState(() => _saving = false);
     }
   }
 
   @override
   Widget build(BuildContext context) {
-    final resumeName = _account?.resumeName ?? '';
+    final account = _account;
+    final hasLegacyResume = account?.resumeName.isNotEmpty == true;
     return Scaffold(
-      backgroundColor: HabiColors.navy,
-      appBar: AppBar(
-        backgroundColor: HabiColors.navy,
-        foregroundColor: HabiColors.cream,
-        title: Text('Resume'),
-      ),
-      body: Stack(
-        fit: StackFit.expand,
+      appBar: AppBar(title: const Text('Resume')),
+      body: ListView(
+        padding: const EdgeInsets.all(20),
         children: [
-          HabiBackground(),
-          SafeArea(
-            child: Padding(
-              padding: EdgeInsets.all(20),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  Text(
-                    'Add a resume to your profile',
-                    style: TextStyle(
-                      color: HabiColors.cream,
-                      fontSize: 20,
-                      fontWeight: FontWeight.w700,
-                    ),
-                  ),
-                  SizedBox(height: 8),
-                  Text(
-                    'Choose a PDF document. It is stored privately with your profile.',
-                    style: TextStyle(color: HabiColors.cream.withAlpha(200)),
-                  ),
-                  SizedBox(height: 20),
-                  if (resumeName.isNotEmpty)
-                    Card(
-                      color: HabiColors.navyMid.withAlpha(240),
-                      child: ListTile(
-                        leading: Icon(
-                          Icons.description_outlined,
-                          color: HabiColors.gold,
-                        ),
-                        title: Text(
-                          resumeName,
-                          style: TextStyle(color: HabiColors.cream),
-                          maxLines: 2,
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                        subtitle: Text(
-                          'Saved resume',
-                          style: TextStyle(
-                            color: HabiColors.cream.withAlpha(180),
-                          ),
-                        ),
-                        trailing: IconButton(
-                          tooltip: 'Remove resume',
-                          onPressed: _removeResume,
-                          icon: Icon(
-                            Icons.delete_outline,
-                            color: HabiColors.cream,
-                          ),
-                        ),
-                      ),
-                    ),
-                  SizedBox(height: 12),
-                  SizedBox(
-                    height: 52,
-                    child: FilledButton.icon(
-                      onPressed: _isPicking ? null : _chooseResume,
-                      icon: _isPicking
-                          ? SizedBox.square(
-                              dimension: 18,
-                              child: CircularProgressIndicator(strokeWidth: 2),
-                            )
-                          : Icon(Icons.upload_file_outlined),
-                      label: Text(
-                        resumeName.isEmpty
-                            ? 'Choose Resume File'
-                            : 'Replace Resume',
-                      ),
-                      style: FilledButton.styleFrom(
-                        backgroundColor: HabiColors.gold,
-                        foregroundColor: HabiColors.ink,
-                      ),
-                    ),
-                  ),
-                  SizedBox(height: 10),
-                  Text(
-                    'Supported format: PDF only',
-                    textAlign: TextAlign.center,
-                    style: TextStyle(
-                      color: HabiColors.cream.withAlpha(170),
-                      fontSize: 12,
-                    ),
-                  ),
-                ],
+          const Icon(
+            Icons.description_outlined,
+            size: 48,
+            color: HabiColors.teal,
+          ),
+          const SizedBox(height: 16),
+          Text(
+            'Apply with your professional profile',
+            style: Theme.of(context).textTheme.titleLarge,
+          ),
+          const SizedBox(height: 8),
+          const Text(
+            'Resume attachments are temporarily unavailable. Your profile includes your professional summary, education, skills, experience, and preferences, and can be shared when you apply.',
+          ),
+          if (hasLegacyResume) ...[
+            const SizedBox(height: 20),
+            Card(
+              child: ListTile(
+                leading: const Icon(Icons.description_outlined),
+                title: Text(account!.resumeName),
+                subtitle: const Text('Legacy attachment reference'),
+                trailing: IconButton(
+                  tooltip: 'Remove old resume reference',
+                  onPressed: _saving ? null : _removeLegacyResume,
+                  icon: const Icon(Icons.delete_outline),
+                ),
               ),
             ),
-          ),
+          ],
         ],
       ),
     );

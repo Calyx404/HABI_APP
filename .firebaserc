@@ -1,5 +1,8 @@
 {
   "projects": {
-    "default": "habi-71971"
-  }
+    "default": "habi-71971",
+    "habi": "habi-71971"
+  },
+  "targets": {},
+  "etags": {}
 }

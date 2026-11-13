@@ -1,7 +1,6 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_core/firebase_core.dart';
-import 'package:firebase_storage/firebase_storage.dart';
 
 import 'package:habi/backend/firebase_config.dart';
 
@@ -12,7 +11,6 @@ class HabiFirebaseServices {
 
   late final FirebaseAuth auth;
   late final FirebaseFirestore firestore;
-  late final FirebaseStorage storage;
 
   Future<void> initialize() async {
     final options = HabiFirebaseConfig.currentPlatform;
@@ -28,7 +26,6 @@ class HabiFirebaseServices {
     }
     auth = FirebaseAuth.instance;
     firestore = FirebaseFirestore.instance;
-    storage = FirebaseStorage.instance;
 
     const useEmulator = bool.fromEnvironment('FIREBASE_USE_EMULATOR');
     if (useEmulator) {
@@ -38,7 +35,6 @@ class HabiFirebaseServices {
       );
       await auth.useAuthEmulator(host, 9099);
       firestore.useFirestoreEmulator(host, 8080);
-      await storage.useStorageEmulator(host, 9199);
     }
   }
 }

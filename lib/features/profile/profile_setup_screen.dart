@@ -3,11 +3,11 @@ import 'package:flutter/material.dart';
 import 'package:habi/shared/theme/habi_background.dart';
 
 import 'package:habi/data/account_store.dart';
+import 'package:habi/backend/auth_service.dart';
 import 'package:habi/shared/widgets/form_widgets.dart';
 import 'package:habi/shared/theme/habi_colors.dart';
-import 'package:habi/features/home/home_screen.dart';
+import 'package:habi/features/home/job_seeker_shell.dart';
 import 'package:habi/shared/data/ph_locations.dart';
-import 'package:habi/shared/pickers/resume_picker.dart';
 
 const String kPreferNotDisclose = 'Other / Prefer not to disclose';
 const List<String> kBeneficiaryCategories = [
@@ -115,7 +115,6 @@ class _ProfileSetupScreenState extends State<ProfileSetupScreen> {
   String? _time;
   Set<String> _accessibility = {};
   bool _shareAccessibility = false;
-  String _resume = '';
 
   @override
   void initState() {
@@ -135,7 +134,6 @@ class _ProfileSetupScreenState extends State<ProfileSetupScreen> {
     _time = a.availabilityTime.isEmpty ? null : a.availabilityTime;
     _accessibility = {...a.accessibility};
     _shareAccessibility = a.shareAccessibility;
-    _resume = a.resumeName;
   }
 
   @override
@@ -179,14 +177,11 @@ class _ProfileSetupScreenState extends State<ProfileSetupScreen> {
     }
   }
 
-  Future<void> _pickResume() async {
-    final name = await pickResumeFile(context);
-    if (name != null && mounted) setState(() => _resume = name);
-  }
-
   void _goHome() {
     Navigator.of(context).pushAndRemoveUntil(
-      MaterialPageRoute(builder: (_) => HomeScreen(userName: widget.userName)),
+      MaterialPageRoute(
+        builder: (_) => JobSeekerShell(userName: widget.userName),
+      ),
       (route) => false,
     );
   }
@@ -206,16 +201,12 @@ class _ProfileSetupScreenState extends State<ProfileSetupScreen> {
     a.availabilityTime = _time ?? '';
     a.accessibility = {..._accessibility};
     a.shareAccessibility = _shareAccessibility;
-    a.resumeName = _resume;
     a.profileDone = true;
     try {
       await AccountStore.instance.saveCurrent();
     } catch (error) {
       if (mounted) {
-        showHabiSnack(
-          context,
-          'Could not save your profile. Please try again.',
-        );
+        showHabiSnack(context, firebaseProfileErrorMessage(error));
       }
       return;
     }
@@ -626,54 +617,9 @@ class _ProfileSetupScreenState extends State<ProfileSetupScreen> {
   Widget _buildResume() {
     return HabiCard(
       title: 'Resume / CV',
-      subtitle: 'Optional. A PDF or Word file.',
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          if (_resume.isNotEmpty)
-            Padding(
-              padding: EdgeInsets.only(bottom: 12),
-              child: Row(
-                children: [
-                  Icon(Icons.description_outlined, color: HabiColors.gold),
-                  SizedBox(width: 10),
-                  Expanded(
-                    child: Text(
-                      _resume,
-                      overflow: TextOverflow.ellipsis,
-                      style: TextStyle(color: HabiColors.cream),
-                    ),
-                  ),
-                  IconButton(
-                    tooltip: 'Remove file',
-                    onPressed: () => setState(() => _resume = ''),
-                    icon: Icon(Icons.close, color: HabiColors.cream),
-                  ),
-                ],
-              ),
-            )
-          else
-            Padding(
-              padding: EdgeInsets.only(bottom: 12),
-              child: Text(
-                'No file added yet.',
-                style: TextStyle(color: HabiColors.cream.withAlpha(170)),
-              ),
-            ),
-          OutlinedButton.icon(
-            onPressed: _pickResume,
-            icon: Icon(Icons.upload_file),
-            label: Text(_resume.isEmpty ? 'Upload resume' : 'Replace file'),
-            style: OutlinedButton.styleFrom(
-              foregroundColor: HabiColors.gold,
-              side: BorderSide(color: HabiColors.gold),
-              padding: EdgeInsets.symmetric(horizontal: 18, vertical: 14),
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(12),
-              ),
-            ),
-          ),
-        ],
+      subtitle: 'Optional. Attachments are temporarily unavailable.',
+      child: const Text(
+        'Your professional profile contains the information employers need for an application. Resume attachments can be added when a compliant file service is available.',
       ),
     );
   }

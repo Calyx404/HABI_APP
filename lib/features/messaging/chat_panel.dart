@@ -1,8 +1,7 @@
 import 'package:flutter/material.dart';
 
-import 'package:habi/shared/theme/habi_colors.dart';
 import 'package:habi/data/message_store.dart';
-import 'package:habi/data/notification_store.dart';
+import 'package:habi/data/notification_store.dart' show formatTimeAgo;
 import 'package:habi/features/messaging/messages_view_model.dart';
 
 /// The messages and the text box of a chat. Used by the full chat screen
@@ -73,6 +72,7 @@ class _ChatPanelState extends State<ChatPanel> {
     return ListenableBuilder(
       listenable: MessageStore.instance,
       builder: (context, _) {
+        final scheme = Theme.of(context).colorScheme;
         final conv = MessageStore.instance.byId(widget.conversationId);
         if (conv == null) return SizedBox.shrink();
         final messages = conv.messagesFor(widget.userName);
@@ -109,7 +109,7 @@ class _ChatPanelState extends State<ChatPanel> {
                               'No messages yet.',
                               style: TextStyle(
                                 fontSize: 15,
-                                color: HabiColors.cream.withAlpha(200),
+                                color: scheme.onSurfaceVariant,
                               ),
                             ),
                       ),
@@ -120,7 +120,9 @@ class _ChatPanelState extends State<ChatPanel> {
                       itemCount: messages.length,
                       itemBuilder: (context, i) => _Bubble(
                         message: messages[i],
-                        mine: messages[i].from == widget.userName,
+                        mine:
+                            messages[i].senderId ==
+                            MessageStore.instance.currentUserId,
                       ),
                     ),
             ),
@@ -133,6 +135,7 @@ class _ChatPanelState extends State<ChatPanel> {
   }
 
   Widget _buildQuick() {
+    final scheme = Theme.of(context).colorScheme;
     return Padding(
       padding: EdgeInsets.fromLTRB(16, 0, 8, 8),
       child: Column(
@@ -146,7 +149,7 @@ class _ChatPanelState extends State<ChatPanel> {
                   style: TextStyle(
                     fontSize: 15,
                     fontWeight: FontWeight.w600,
-                    color: HabiColors.cream,
+                    color: scheme.onSurface,
                   ),
                 ),
               ),
@@ -156,7 +159,7 @@ class _ChatPanelState extends State<ChatPanel> {
                 icon: Icon(
                   Icons.close,
                   size: 18,
-                  color: HabiColors.cream.withAlpha(200),
+                  color: scheme.onSurfaceVariant,
                 ),
               ),
             ],
@@ -176,17 +179,15 @@ class _ChatPanelState extends State<ChatPanel> {
                           vertical: 9,
                         ),
                         decoration: BoxDecoration(
-                          color: HabiColors.navyMid,
+                          color: scheme.surfaceContainerHigh,
                           borderRadius: BorderRadius.circular(20),
-                          border: Border.all(
-                            color: HabiColors.gold.withAlpha(140),
-                          ),
+                          border: Border.all(color: scheme.outlineVariant),
                         ),
                         child: Text(
                           reply,
                           style: TextStyle(
                             fontSize: 14,
-                            color: HabiColors.cream,
+                            color: scheme.onSurface,
                           ),
                         ),
                       ),
@@ -201,8 +202,9 @@ class _ChatPanelState extends State<ChatPanel> {
   }
 
   Widget _buildInput() {
+    final scheme = Theme.of(context).colorScheme;
     return Container(
-      color: HabiColors.navy,
+      color: scheme.surface,
       padding: EdgeInsets.fromLTRB(12, 8, 12, 8),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.end,
@@ -210,27 +212,29 @@ class _ChatPanelState extends State<ChatPanel> {
           Expanded(
             child: TextField(
               controller: _controller,
+              textInputAction: TextInputAction.send,
+              onSubmitted: (_) => _send(),
               minLines: 1,
               maxLines: 4,
               textCapitalization: TextCapitalization.sentences,
-              style: TextStyle(color: HabiColors.cream),
-              cursorColor: HabiColors.gold,
+              style: TextStyle(color: scheme.onSurface),
+              cursorColor: scheme.primary,
               decoration: InputDecoration(
                 hintText: 'Message',
-                hintStyle: TextStyle(color: HabiColors.cream.withAlpha(130)),
+                hintStyle: TextStyle(color: scheme.onSurfaceVariant),
                 filled: true,
-                fillColor: HabiColors.navyMid,
+                fillColor: scheme.surfaceContainerHigh,
                 contentPadding: EdgeInsets.symmetric(
                   horizontal: 16,
                   vertical: 12,
                 ),
                 enabledBorder: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(24),
-                  borderSide: BorderSide(color: HabiColors.cream.withAlpha(60)),
+                  borderSide: BorderSide(color: scheme.outlineVariant),
                 ),
                 focusedBorder: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(24),
-                  borderSide: BorderSide(color: HabiColors.gold),
+                  borderSide: BorderSide(color: scheme.primary),
                 ),
               ),
             ),
@@ -243,8 +247,8 @@ class _ChatPanelState extends State<ChatPanel> {
               onPressed: _viewModel.isSending ? null : _send,
               style: FilledButton.styleFrom(
                 padding: EdgeInsets.zero,
-                backgroundColor: Color(0xFFE2BB6C),
-                foregroundColor: HabiColors.ink,
+                backgroundColor: scheme.primary,
+                foregroundColor: scheme.onPrimary,
                 shape: CircleBorder(),
               ),
               child: _viewModel.isSending
@@ -269,6 +273,7 @@ class _Bubble extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
     return Align(
       alignment: mine ? Alignment.centerRight : Alignment.centerLeft,
       child: Container(
@@ -278,16 +283,14 @@ class _Bubble extends StatelessWidget {
         margin: EdgeInsets.only(bottom: 10),
         padding: EdgeInsets.fromLTRB(14, 10, 14, 8),
         decoration: BoxDecoration(
-          color: mine ? Color(0xFFE2BB6C) : HabiColors.navyMid,
+          color: mine ? scheme.primaryContainer : scheme.surfaceContainerHigh,
           borderRadius: BorderRadius.only(
             topLeft: Radius.circular(16),
             topRight: Radius.circular(16),
             bottomLeft: Radius.circular(mine ? 16 : 4),
             bottomRight: Radius.circular(mine ? 4 : 16),
           ),
-          border: mine
-              ? null
-              : Border.all(color: HabiColors.cream.withAlpha(50)),
+          border: mine ? null : Border.all(color: scheme.outlineVariant),
         ),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.end,
@@ -299,7 +302,7 @@ class _Bubble extends StatelessWidget {
                 message.text,
                 style: TextStyle(
                   fontSize: 15,
-                  color: mine ? HabiColors.ink : HabiColors.cream,
+                  color: mine ? scheme.onPrimaryContainer : scheme.onSurface,
                 ),
               ),
             ),
@@ -309,8 +312,8 @@ class _Bubble extends StatelessWidget {
               style: TextStyle(
                 fontSize: 10,
                 color: mine
-                    ? HabiColors.navy.withAlpha(170)
-                    : HabiColors.cream.withAlpha(150),
+                    ? scheme.onPrimaryContainer.withAlpha(190)
+                    : scheme.onSurfaceVariant,
               ),
             ),
           ],

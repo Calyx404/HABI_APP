@@ -3,8 +3,8 @@ import 'package:flutter/material.dart';
 import 'package:habi/shared/theme/habi_background.dart';
 
 import 'package:habi/features/messaging/chat_panel.dart';
-import 'package:habi/shared/theme/habi_colors.dart';
 import 'package:habi/data/message_store.dart';
+import 'package:habi/shared/widgets/habi_notification_button.dart';
 
 /// The full-screen chat between an employer and an applicant.
 class ChatScreen extends StatelessWidget {
@@ -19,13 +19,14 @@ class ChatScreen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
     final conv = MessageStore.instance.byId(conversationId);
     if (conv == null) {
       return Scaffold(
-        backgroundColor: HabiColors.navy,
+        backgroundColor: scheme.surface,
         appBar: AppBar(
-          backgroundColor: HabiColors.navy,
-          foregroundColor: HabiColors.cream,
+          backgroundColor: scheme.surface,
+          foregroundColor: scheme.onSurface,
         ),
         body: SizedBox.shrink(),
       );
@@ -33,22 +34,22 @@ class ChatScreen extends StatelessWidget {
     final other = conv.otherPerson(userName);
 
     return Scaffold(
-      backgroundColor: HabiColors.navy,
+      backgroundColor: scheme.surface,
       appBar: AppBar(
-        backgroundColor: HabiColors.navy,
-        foregroundColor: HabiColors.cream,
+        backgroundColor: scheme.surface,
+        foregroundColor: scheme.onSurface,
         elevation: 0,
         titleSpacing: 0,
         title: Row(
           children: [
             CircleAvatar(
               radius: 18,
-              backgroundColor: HabiColors.gold,
+              backgroundColor: scheme.primaryContainer,
               child: Text(
                 other.isEmpty ? '?' : other[0].toUpperCase(),
                 style: TextStyle(
                   fontWeight: FontWeight.w700,
-                  color: HabiColors.ink,
+                  color: scheme.onPrimaryContainer,
                 ),
               ),
             ),
@@ -67,7 +68,7 @@ class ChatScreen extends StatelessWidget {
                     overflow: TextOverflow.ellipsis,
                     style: TextStyle(
                       fontSize: 12,
-                      color: HabiColors.cream.withAlpha(190),
+                      color: scheme.onSurfaceVariant,
                     ),
                   ),
                 ],
@@ -75,6 +76,7 @@ class ChatScreen extends StatelessWidget {
             ),
           ],
         ),
+        actions: [HabiNotificationButton(userName: userName)],
       ),
       body: Stack(
         fit: StackFit.expand,
@@ -87,10 +89,7 @@ class ChatScreen extends StatelessWidget {
               emptyState: Text(
                 'Say hello to $other about "${conv.jobTitle}".',
                 textAlign: TextAlign.center,
-                style: TextStyle(
-                  fontSize: 15,
-                  color: HabiColors.cream.withAlpha(200),
-                ),
+                style: TextStyle(fontSize: 15, color: scheme.onSurfaceVariant),
               ),
             ),
           ),

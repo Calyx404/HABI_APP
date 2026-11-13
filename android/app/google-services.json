@@ -7,9 +7,9 @@
   "client": [
     {
       "client_info": {
-        "mobilesdk_app_id": "1:764975635143:android:ba9906d8b3337842993ce2",
+        "mobilesdk_app_id": "1:764975635143:android:c89cfc7680c6c489993ce2",
         "android_client_info": {
-          "package_name": "com.example.my_first_flutter_app"
+          "package_name": "com.habi.app"
         }
       },
       "oauth_client": [],

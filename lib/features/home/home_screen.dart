@@ -1,26 +1,38 @@
 import 'package:flutter/material.dart';
 
-import 'package:habi/shared/theme/habi_background.dart';
+import 'dart:async';
 
 import 'package:habi/data/account_store.dart';
-import 'package:habi/shared/theme/habi_colors.dart';
-import 'package:habi/shared/widgets/habi_nav_bar.dart';
-import 'package:habi/features/jobs/job_card.dart';
+import 'package:habi/data/job_matcher.dart';
 import 'package:habi/data/job_store.dart';
+import 'package:habi/features/jobs/job_card.dart';
 import 'package:habi/features/jobs/jobs_screen.dart';
-import 'package:habi/features/jobs/my_applications_screen.dart';
-import 'package:habi/features/jobs/my_jobs_screen.dart';
-import 'package:habi/data/notification_store.dart';
-import 'package:habi/features/notifications/notifications_screen.dart';
-import 'package:habi/features/profile/profile_screen.dart';
-import 'package:habi/features/profile/profile_setup_screen.dart';
 import 'package:habi/features/support/support_screen.dart';
+import 'package:habi/shared/theme/habi_background.dart';
+import 'package:habi/shared/theme/habi_colors.dart';
+import 'package:habi/shared/theme/habi_design_system.dart';
+import 'package:habi/shared/widgets/habi_components.dart';
+import 'package:habi/shared/widgets/habi_ui.dart';
+import 'package:habi/shared/widgets/habi_notification_button.dart';
+import 'package:habi/data/habi_thread_repository.dart';
+import 'package:habi/features/threads/thread_screens.dart';
+import 'package:habi/features/threads/thread_widgets.dart';
 
-/// Home / Dashboard.
 class HomeScreen extends StatefulWidget {
-  const HomeScreen({super.key, required this.userName});
+  const HomeScreen({
+    super.key,
+    required this.userName,
+    this.onOpenExplore,
+    this.onOpenNotifications,
+    this.onOpenProfile,
+    this.onCreateThread,
+  });
 
   final String userName;
+  final VoidCallback? onOpenExplore;
+  final VoidCallback? onOpenNotifications;
+  final VoidCallback? onOpenProfile;
+  final VoidCallback? onCreateThread;
 
   @override
   State<HomeScreen> createState() => _HomeScreenState();
@@ -28,12 +40,20 @@ class HomeScreen extends StatefulWidget {
 
 class _HomeScreenState extends State<HomeScreen> {
   final _searchController = TextEditingController();
+  late final HabiThreadRepository _threadRepository = HabiThreadRepository();
+  late final ThreadFeedController _feedController = ThreadFeedController(
+    repository: _threadRepository,
+  );
 
   @override
-  void dispose() {
-    _searchController.dispose();
-    super.dispose();
+  void initState() {
+    super.initState();
+    unawaited(_feedController.loadMore());
   }
+
+  String get _firstName =>
+      AccountStore.instance.byDisplayName(widget.userName)?.firstName ??
+      widget.userName.split(' ').first;
 
   String get _greeting {
     final hour = DateTime.now().hour;
@@ -42,531 +62,401 @@ class _HomeScreenState extends State<HomeScreen> {
     return 'Good evening';
   }
 
-  String get _firstName =>
-      AccountStore.instance.byDisplayName(widget.userName)?.firstName ??
-      widget.userName;
-
-  String get _initial => _firstName.isEmpty ? 'H' : _firstName[0].toUpperCase();
-
-  void _message(String text) {
-    ScaffoldMessenger.of(context)
-      ..hideCurrentSnackBar()
-      ..showSnackBar(
-        SnackBar(
-          content: Text(text),
-          behavior: SnackBarBehavior.floating,
-          backgroundColor: HabiColors.navyLight,
-        ),
-      );
+  @override
+  void dispose() {
+    _searchController.dispose();
+    _feedController.dispose();
+    super.dispose();
   }
 
-  void _push(Widget screen) {
-    Navigator.of(context).push(MaterialPageRoute(builder: (_) => screen));
-  }
+  void _push(Widget page) =>
+      Navigator.of(context)
+          .push<void>(MaterialPageRoute<void>(builder: (_) => page));
 
-  void _openProfile() {
-    _push(ProfileScreen(userName: widget.userName));
-  }
-
-  Future<void> _openProfileSetup() async {
-    final saved = await Navigator.of(context).push<bool>(
-      MaterialPageRoute(
-        builder: (_) => ProfileSetupScreen(userName: widget.userName),
-      ),
-    );
-    if (saved == true && mounted) _message('Profile saved.');
-  }
+  void _openJobs() => _push(
+    JobsScreen(userName: widget.userName, initialQuery: _searchController.text),
+  );
 
   @override
   Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final account = AccountStore.instance.current;
+    final skills = account?.skills.take(4).toList() ?? const <String>[];
+
     return Scaffold(
-      backgroundColor: HabiColors.navy,
       body: Stack(
         fit: StackFit.expand,
         children: [
-          HabiBackground(),
+          const HabiBackground(),
           SafeArea(
             bottom: false,
-            child: SingleChildScrollView(
-              padding: EdgeInsets.fromLTRB(20, 16, 20, 24),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  _buildHeader(),
-                  SizedBox(height: 18),
-                  _buildSearchBar(),
-                  SizedBox(height: 20),
-                  _buildBanner(),
-                  SizedBox(height: 22),
-                  _buildShortcuts(),
-                  SizedBox(height: 24),
-                  _buildProfilePrompt(),
-                  Row(
-                    children: [
-                      Expanded(
-                        child: Text(
-                          'Recommended for You',
-                          style: TextStyle(
-                            fontSize: 20,
-                            fontWeight: FontWeight.w600,
-                            color: HabiColors.cream,
+            child: NotificationListener<ScrollNotification>(
+              onNotification: (notification) {
+                if (notification.metrics.extentAfter < 350 &&
+                    _feedController.hasMore &&
+                    !_feedController.isLoading) {
+                  unawaited(_feedController.loadMore());
+                }
+                return false;
+              },
+              child: RefreshIndicator(
+                onRefresh: _feedController.refresh,
+                child: CustomScrollView(
+                  keyboardDismissBehavior:
+                      ScrollViewKeyboardDismissBehavior.onDrag,
+                  slivers: [
+                    SliverPadding(
+                      padding: const EdgeInsets.fromLTRB(20, 10, 20, 28),
+                      sliver: SliverList.list(
+                        children: [
+                          _topBar(context),
+                          const SizedBox(height: 28),
+                          Text(
+                            _greeting,
+                            style: Theme.of(context).textTheme.bodyLarge
+                                ?.copyWith(color: scheme.onSurfaceVariant),
                           ),
-                        ),
+                          const SizedBox(height: 3),
+                          Text(
+                            '$_firstName,',
+                            style: Theme.of(context).textTheme.displayLarge,
+                          ),
+                          const SizedBox(height: 8),
+                          Text(
+                            'Find your people. Share what you can do.',
+                            style: Theme.of(context).textTheme.bodyMedium,
+                          ),
+                          const SizedBox(height: 22),
+                          _searchBox(context),
+                          const SizedBox(height: 22),
+                          _spotlight(context),
+                          const SizedBox(height: 28),
+                          _sectionTitle(
+                            context,
+                            'Your next steps',
+                            action: 'See all',
+                            onAction: widget.onOpenExplore,
+                          ),
+                          const SizedBox(height: 14),
+                          _quickActions(context),
+                          if (skills.isNotEmpty) ...[
+                            const SizedBox(height: 28),
+                            _sectionTitle(context, 'Your skills, in focus'),
+                            const SizedBox(height: 12),
+                            Wrap(
+                              spacing: 8,
+                              runSpacing: 8,
+                              children: skills
+                                  .map((skill) => HabiFilterChip(label: skill))
+                                  .toList(),
+                            ),
+                          ],
+                          const SizedBox(height: 30),
+                          _sectionTitle(
+                            context,
+                            'From the community',
+                            action: 'Explore',
+                            onAction: widget.onOpenExplore,
+                          ),
+                          const SizedBox(height: 13),
+                          HabiThreadFeedPanel(
+                            controller: _feedController,
+                            repository: _threadRepository,
+                            onCreateThread: widget.onCreateThread,
+                          ),
+                          const SizedBox(height: 26),
+                          _sectionTitle(
+                            context,
+                            'Opportunities for you',
+                            action: 'Browse jobs',
+                            onAction: _openJobs,
+                          ),
+                          const SizedBox(height: 12),
+                          _recommendedJobs(context),
+                          const SizedBox(height: 20),
+                          _supportCard(context),
+                        ],
                       ),
-                      TextButton(
-                        onPressed: () =>
-                            _push(JobsScreen(userName: widget.userName)),
-                        style: TextButton.styleFrom(
-                          foregroundColor: HabiColors.gold,
-                        ),
-                        child: Text('View All'),
-                      ),
-                    ],
-                  ),
-                  SizedBox(height: 8),
-                  _buildRecommended(),
-                  SizedBox(height: 20),
-                  _buildGrowthCard(),
-                ],
+                    ),
+                  ],
+                ),
               ),
             ),
           ),
         ],
       ),
-      bottomNavigationBar: HabiNavBar(
-        userName: widget.userName,
-        active: NavTab.home,
-      ),
     );
   }
 
-  Widget _buildHeader() {
+  Widget _topBar(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
     return Row(
-      crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Expanded(
-          child: Column(
+        Container(
+          width: 42,
+          height: 42,
+          padding: const EdgeInsets.all(5),
+          decoration: BoxDecoration(
+            color: scheme.surface,
+            borderRadius: BorderRadius.circular(14),
+            boxShadow: HabiShadows.card,
+          ),
+          child: Image.asset(
+            'assets/habi_logo.png',
+            filterQuality: FilterQuality.medium,
+          ),
+        ),
+        const SizedBox(width: 10),
+        Text(
+          'HABI',
+          style: Theme.of(context).textTheme.titleLarge
+              ?.copyWith(letterSpacing: 1.1, color: scheme.primary),
+        ),
+        const Spacer(),
+        IconButton.filledTonal(
+          tooltip: 'Create a thread',
+          onPressed:
+              widget.onCreateThread ??
+              () => _push(CreateThreadScreen(userName: widget.userName)),
+          icon: const Icon(Icons.edit_square),
+        ),
+        const SizedBox(width: 7),
+        HabiNotificationButton(
+          userName: widget.userName,
+          onPressed: widget.onOpenNotifications,
+        ),
+        const SizedBox(width: 4),
+        Semantics(
+          button: true,
+          label: 'Open your profile',
+          child: InkWell(
+            customBorder: const CircleBorder(),
+            onTap: widget.onOpenProfile,
+            child: HabiProfileAvatar(name: _firstName, size: 42),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _searchBox(BuildContext context) => TextField(
+    controller: _searchController,
+    textInputAction: TextInputAction.search,
+    onSubmitted: (_) => _openJobs(),
+    decoration: InputDecoration(
+      hintText: 'Search roles, skills, or people',
+      prefixIcon: const Icon(Icons.search_rounded),
+      suffixIcon: IconButton(
+        tooltip: 'Browse jobs',
+        onPressed: _openJobs,
+        icon: const Icon(Icons.tune_rounded),
+      ),
+    ),
+  );
+
+  Widget _spotlight(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return Container(
+      padding: const EdgeInsets.all(22),
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(HabiRadius.lg),
+        gradient: LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: [HabiColors.deepTeal, HabiColors.teal],
+        ),
+        boxShadow: HabiShadows.floating,
+      ),
+      child: Stack(
+        children: [
+          Positioned(
+            right: -10,
+            top: -18,
+            child: Icon(
+              Icons.hub_outlined,
+              size: 132,
+              color: Colors.white.withAlpha(24),
+            ),
+          ),
+          Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text(
-                '$_greeting,',
-                style: TextStyle(
-                  fontSize: 18,
-                  color: HabiColors.cream.withAlpha(230),
+              Container(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 10,
+                  vertical: 6,
+                ),
+                decoration: BoxDecoration(
+                  color: Colors.white.withAlpha(24),
+                  borderRadius: BorderRadius.circular(HabiRadius.pill),
+                ),
+                child: Text(
+                  'A COMMUNITY THAT MOVES WITH YOU',
+                  style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                    color: Colors.white,
+                    letterSpacing: .9,
+                    fontWeight: FontWeight.w700,
+                  ),
                 ),
               ),
+              const SizedBox(height: 16),
               Text(
-                '$_firstName!',
-                style: TextStyle(
-                  fontSize: 28,
-                  fontWeight: FontWeight.w700,
-                  color: HabiColors.cream,
-                ),
+                'Every skill\nhas a story.',
+                style: Theme.of(context).textTheme.headlineLarge
+                    ?.copyWith(color: Colors.white, height: 1.28),
               ),
-              SizedBox(height: 4),
+              const SizedBox(height: 8),
               Text(
-                'Discover opportunities that fit you.',
-                style: TextStyle(
-                  fontSize: 14,
-                  color: HabiColors.cream.withAlpha(210),
+                'Share your work and find opportunities built around your strengths.',
+                style: Theme.of(context).textTheme.bodyMedium
+                    ?.copyWith(color: Colors.white.withAlpha(220)),
+              ),
+              const SizedBox(height: 18),
+              FilledButton.tonalIcon(
+                onPressed:
+                    widget.onCreateThread ??
+                    () => _push(CreateThreadScreen(userName: widget.userName)),
+                icon: const Icon(Icons.add),
+                label: const Text('Create a thread'),
+                style: FilledButton.styleFrom(
+                  foregroundColor: scheme.primary,
+                  backgroundColor: scheme.surface,
                 ),
               ),
             ],
           ),
+        ],
+      ),
+    );
+  }
+
+  Widget _sectionTitle(
+    BuildContext context,
+    String title, {
+    String? action,
+    VoidCallback? onAction,
+  }) => Row(
+    children: [
+      Expanded(
+        child: Text(title, style: Theme.of(context).textTheme.titleLarge),
+      ),
+      if (action != null) TextButton(onPressed: onAction, child: Text(action)),
+    ],
+  );
+
+  Widget _quickActions(BuildContext context) => Row(
+    children: [
+      Expanded(
+        child: _QuickActionCard(
+          icon: Icons.search_rounded,
+          title: 'Discover',
+          subtitle: 'People and circles',
+          onTap: widget.onOpenExplore,
         ),
-        ListenableBuilder(
-          listenable: NotificationStore.instance,
-          builder: (context, _) {
-            final unread = NotificationStore.instance.unreadCount(
-              widget.userName,
-            );
-            return IconButton(
-              tooltip: 'Notifications',
-              onPressed: () =>
-                  _push(NotificationsScreen(userName: widget.userName)),
-              icon: Stack(
-                clipBehavior: Clip.none,
+      ),
+      const SizedBox(width: 12),
+      Expanded(
+        child: _QuickActionCard(
+          icon: Icons.work_outline_rounded,
+          title: 'Find work',
+          subtitle: 'Inclusive roles',
+          onTap: _openJobs,
+        ),
+      ),
+    ],
+  );
+
+  Widget _recommendedJobs(BuildContext context) => ListenableBuilder(
+    listenable: JobStore.instance,
+    builder: (context, _) => ListenableBuilder(
+      listenable: AccountStore.instance,
+      builder: (context, _) {
+        final matches = const JobMatcher()
+            .rank(JobStore.instance.jobs, AccountStore.instance.current)
+            .take(2)
+            .toList();
+        if (matches.isEmpty) {
+          return Card(
+            child: Padding(
+              padding: const EdgeInsets.all(20),
+              child: Row(
                 children: [
                   Icon(
-                    Icons.notifications_none,
-                    color: HabiColors.cream,
-                    size: 28,
+                    Icons.work_outline,
+                    color: Theme.of(context).colorScheme.primary,
                   ),
-                  if (unread > 0)
-                    Positioned(
-                      right: -1,
-                      top: -1,
-                      child: Container(
-                        width: 12,
-                        height: 12,
-                        decoration: BoxDecoration(
-                          color: HabiColors.gold,
-                          shape: BoxShape.circle,
-                          border: Border.all(color: HabiColors.ink, width: 2),
-                        ),
-                      ),
+                  const SizedBox(width: 14),
+                  Expanded(
+                    child: Text(
+                      'New roles will appear here as employers share opportunities.',
+                      style: Theme.of(context).textTheme.bodyMedium,
                     ),
+                  ),
                 ],
               ),
-            );
-          },
-        ),
-        Padding(
-          padding: EdgeInsets.only(left: 4, top: 4),
-          child: Tooltip(
-            message: 'Open profile',
-            child: InkWell(
-              onTap: _openProfile,
-              customBorder: CircleBorder(),
-              child: CircleAvatar(
-                radius: 20,
-                backgroundColor: HabiColors.gold,
-                child: Text(
-                  _initial,
-                  style: TextStyle(
-                    fontSize: 18,
-                    fontWeight: FontWeight.w700,
-                    color: HabiColors.ink,
-                  ),
-                ),
-              ),
             ),
-          ),
-        ),
-      ],
-    );
-  }
-
-  Widget _buildSearchBar() {
-    return Container(
-      height: 54,
-      decoration: BoxDecoration(
-        color: HabiColors.navy.withAlpha(200),
-        borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: HabiColors.cream.withAlpha(70)),
-      ),
-      child: TextField(
-        controller: _searchController,
-        style: TextStyle(color: HabiColors.cream),
-        cursorColor: HabiColors.gold,
-        textInputAction: TextInputAction.search,
-        onSubmitted: (_) => _openJobs(),
-        decoration: InputDecoration(
-          border: InputBorder.none,
-          hintText: 'Search jobs, skills, or companies...',
-          hintStyle: TextStyle(
-            color: HabiColors.cream.withAlpha(150),
-            fontSize: 14,
-          ),
-          prefixIcon: Icon(Icons.search, color: HabiColors.cream),
-          suffixIcon: IconButton(
-            icon: Icon(Icons.tune, color: HabiColors.cream.withAlpha(200)),
-            tooltip: 'Filter jobs',
-            onPressed: () => _openJobs(showFilters: true),
-          ),
-          contentPadding: EdgeInsets.symmetric(vertical: 16),
-        ),
-      ),
-    );
-  }
-
-  void _openJobs({bool showFilters = false}) => _push(
-    JobsScreen(
-      userName: widget.userName,
-      initialQuery: _searchController.text,
-      showFiltersOnOpen: showFilters,
+          );
+        }
+        return Column(
+          children: [
+            for (final match in matches) ...[
+              JobCard(job: match.job, userName: widget.userName),
+              const SizedBox(height: 10),
+            ],
+          ],
+        );
+      },
     ),
   );
 
-  Widget _buildBanner() {
-    final isDark = HabiColors.isDarkMode;
-    return Container(
-      padding: EdgeInsets.all(3),
-      decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(20),
-        border: Border.all(color: HabiColors.gold, width: 3),
-      ),
-      child: Container(
-        padding: EdgeInsets.fromLTRB(18, 18, 14, 18),
-        decoration: BoxDecoration(
-          color: HabiColors.navy.withAlpha(200),
-          borderRadius: BorderRadius.circular(16),
-          border: Border.all(
-            color: isDark
-                ? HabiColors.navyLight.withAlpha(180)
-                : HabiColors.gold.withAlpha(110),
-          ),
-        ),
-        child: Row(
-          children: [
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    'Your skills are in demand',
-                    style: TextStyle(
-                      fontSize: 18,
-                      fontWeight: FontWeight.w600,
-                      color: HabiColors.cream,
-                    ),
-                  ),
-                  SizedBox(height: 6),
-                  Text(
-                    'Administrative roles near you',
-                    style: TextStyle(
-                      fontSize: 15,
-                      color: HabiColors.cream.withAlpha(220),
-                    ),
-                  ),
-                  SizedBox(height: 14),
-                  FilledButton(
-                    onPressed: () =>
-                        _push(JobsScreen(userName: widget.userName)),
-                    style: FilledButton.styleFrom(
-                      backgroundColor: Color(0xFFE2BB6C),
-                      foregroundColor: HabiColors.ink,
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(10),
-                      ),
-                    ),
-                    child: Text(
-                      'Explore Jobs',
-                      style: TextStyle(fontWeight: FontWeight.w600),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-            SizedBox(width: 8),
-            Icon(
-              Icons.shopping_basket_outlined,
-              size: 84,
-              color: HabiColors.gold,
-            ),
-          ],
-        ),
+  Widget _supportCard(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return Card(
+      child: ListTile(
+        contentPadding: const EdgeInsets.symmetric(horizontal: 18, vertical: 8),
+        leading: Icon(Icons.support_agent_rounded, color: scheme.primary),
+        title: const Text('Need a hand?'),
+        subtitle: const Text('Our support team is here to help.'),
+        trailing: const Icon(Icons.arrow_forward_rounded),
+        onTap: () => _push(SupportScreen(userName: widget.userName)),
       ),
     );
   }
+}
 
-  Widget _buildGrowthCard() {
-    final isDark = HabiColors.isDarkMode;
-    final primaryText = isDark ? HabiColors.cream : HabiColors.ink;
-    final secondaryText = isDark
-        ? HabiColors.tan
-        : HabiColors.ink.withAlpha(205);
-    return Container(
-      padding: EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-      decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(18),
-        gradient: LinearGradient(
-          begin: Alignment.centerLeft,
-          end: Alignment.centerRight,
-          colors: isDark
-              ? [Color(0xFF182B58), Color(0xFF1B315E)]
-              : [Color(0xFFE8D5B9), Color(0xFFD5E0ED)],
-        ),
-        border: Border.all(color: HabiColors.gold.withAlpha(110)),
-      ),
-      child: Row(
-        children: [
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  'Keep growing!',
-                  style: TextStyle(
-                    color: primaryText,
-                    fontWeight: FontWeight.w700,
-                    fontSize: 16,
-                  ),
-                ),
-                SizedBox(height: 4),
-                Text(
-                  'Your next opportunity could be just around the corner.',
-                  style: TextStyle(color: secondaryText, fontSize: 12),
-                ),
-              ],
-            ),
-          ),
-          SizedBox(width: 12),
-          Icon(Icons.groups, size: 32, color: HabiColors.gold),
-        ],
-      ),
-    );
-  }
+class _QuickActionCard extends StatelessWidget {
+  const _QuickActionCard({
+    required this.icon,
+    required this.title,
+    required this.subtitle,
+    required this.onTap,
+  });
 
-  Widget _shortcut(IconData icon, String label, VoidCallback onTap) {
-    return Expanded(
+  final IconData icon;
+  final String title;
+  final String subtitle;
+  final VoidCallback? onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return Card(
       child: InkWell(
-        borderRadius: BorderRadius.circular(16),
         onTap: onTap,
-        child: Column(
-          children: [
-            Container(
-              width: 66,
-              height: 66,
-              decoration: BoxDecoration(
-                color: HabiColors.navy.withAlpha(200),
-                borderRadius: BorderRadius.circular(16),
-                border: Border.all(color: HabiColors.cream.withAlpha(70)),
-              ),
-              child: Icon(icon, color: HabiColors.gold, size: 30),
-            ),
-            SizedBox(height: 8),
-            Text(
-              label,
-              textAlign: TextAlign.center,
-              maxLines: 2,
-              style: TextStyle(fontSize: 12, color: HabiColors.cream),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildShortcuts() {
-    return Row(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        _shortcut(
-          Icons.work_outline,
-          'Jobs',
-          () => _push(MyJobsScreen(userName: widget.userName)),
-        ),
-        _shortcut(
-          Icons.support_agent,
-          'Support',
-          () => _push(SupportScreen(userName: widget.userName)),
-        ),
-        _shortcut(
-          Icons.description_outlined,
-          'My Applications',
-          () => _push(MyApplicationsScreen(userName: widget.userName)),
-        ),
-      ],
-    );
-  }
-
-  Widget _buildProfilePrompt() {
-    return ListenableBuilder(
-      listenable: AccountStore.instance,
-      builder: (context, _) {
-        final account = AccountStore.instance.byDisplayName(widget.userName);
-        if (account == null || account.profileDone) {
-          return SizedBox.shrink();
-        }
-        return Padding(
-          padding: EdgeInsets.only(bottom: 24),
-          child: Container(
-            width: double.infinity,
-            padding: EdgeInsets.all(16),
-            decoration: BoxDecoration(
-              color: HabiColors.navy.withAlpha(200),
-              borderRadius: BorderRadius.circular(16),
-              border: Border.all(color: HabiColors.gold.withAlpha(140)),
-            ),
-            child: Row(
-              children: [
-                Icon(Icons.person_outline, color: HabiColors.gold, size: 30),
-                SizedBox(width: 14),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        'Complete your profile',
-                        style: TextStyle(
-                          fontSize: 16,
-                          fontWeight: FontWeight.w600,
-                          color: HabiColors.cream,
-                        ),
-                      ),
-                      SizedBox(height: 2),
-                      Text(
-                        'Add your skills, work preferences and accessibility '
-                        'needs.',
-                        style: TextStyle(
-                          fontSize: 13,
-                          color: HabiColors.cream.withAlpha(200),
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-                SizedBox(width: 10),
-                FilledButton(
-                  onPressed: _openProfileSetup,
-                  style: FilledButton.styleFrom(
-                    backgroundColor: Color(0xFFE2BB6C),
-                    foregroundColor: HabiColors.ink,
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(10),
-                    ),
-                  ),
-                  child: Text(
-                    'Start',
-                    style: TextStyle(fontWeight: FontWeight.w600),
-                  ),
-                ),
-              ],
-            ),
+        borderRadius: BorderRadius.circular(HabiRadius.md),
+        child: Padding(
+          padding: const EdgeInsets.all(16),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Icon(icon, color: scheme.primary),
+              const SizedBox(height: 14),
+              Text(title, style: Theme.of(context).textTheme.titleMedium),
+              const SizedBox(height: 3),
+              Text(subtitle, style: Theme.of(context).textTheme.bodySmall),
+            ],
           ),
-        );
-      },
-    );
-  }
-
-  Widget _buildRecommended() {
-    return ListenableBuilder(
-      listenable: JobStore.instance,
-      builder: (context, _) {
-        final jobs = JobStore.instance.jobs.take(5).toList();
-        if (jobs.isEmpty) return _buildEmpty();
-        return Column(
-          children: [
-            for (final job in jobs)
-              JobCard(job: job, userName: widget.userName),
-          ],
-        );
-      },
-    );
-  }
-
-  Widget _buildEmpty() {
-    return Container(
-      width: double.infinity,
-      padding: EdgeInsets.symmetric(vertical: 26, horizontal: 20),
-      decoration: BoxDecoration(
-        color: HabiColors.navy.withAlpha(200),
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: HabiColors.cream.withAlpha(60)),
-      ),
-      child: Column(
-        children: [
-          Icon(Icons.work_outline, color: HabiColors.gold, size: 34),
-          SizedBox(height: 10),
-          Text(
-            'No jobs posted yet',
-            style: TextStyle(
-              fontSize: 16,
-              fontWeight: FontWeight.w600,
-              color: HabiColors.cream,
-            ),
-          ),
-          SizedBox(height: 4),
-          Text(
-            'Jobs that people post will show up here. Tap the round HABI button below to post one.',
-            textAlign: TextAlign.center,
-            style: TextStyle(
-              fontSize: 13,
-              color: HabiColors.cream.withAlpha(190),
-            ),
-          ),
-        ],
+        ),
       ),
     );
   }

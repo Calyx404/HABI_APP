@@ -11,9 +11,6 @@ class HabiFirebaseConfig {
     'FIREBASE_MESSAGING_SENDER_ID',
   );
   static const _projectId = String.fromEnvironment('FIREBASE_PROJECT_ID');
-  static const _storageBucket = String.fromEnvironment(
-    'FIREBASE_STORAGE_BUCKET',
-  );
   static const _authDomain = String.fromEnvironment('FIREBASE_AUTH_DOMAIN');
 
   static FirebaseOptions? get currentPlatform {
@@ -44,7 +41,6 @@ class HabiFirebaseConfig {
       appId: appId,
       messagingSenderId: _senderId,
       projectId: _projectId,
-      storageBucket: _storageBucket.isEmpty ? null : _storageBucket,
       authDomain: _authDomain.isEmpty ? null : _authDomain,
     );
   }

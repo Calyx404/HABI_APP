@@ -93,104 +93,109 @@ class JobCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final tag = _tag;
-    return GestureDetector(
-      onTap: () => _open(context),
-      child: Container(
-        width: double.infinity,
-        margin: EdgeInsets.only(bottom: 12),
-        padding: EdgeInsets.fromLTRB(16, 16, _isOwner ? 8 : 16, 16),
-        decoration: BoxDecoration(
-          color: HabiColors.navy.withAlpha(200),
-          borderRadius: BorderRadius.circular(16),
-          border: Border.all(color: HabiColors.cream.withAlpha(60)),
-        ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              children: [
-                Expanded(
-                  child: Text(
-                    job.title,
-                    style: TextStyle(
-                      fontSize: 17,
-                      fontWeight: FontWeight.w600,
-                      color: HabiColors.cream,
+    final scheme = Theme.of(context).colorScheme;
+    return Card(
+      margin: const EdgeInsets.only(bottom: 12),
+      child: InkWell(
+        onTap: () => _open(context),
+        borderRadius: BorderRadius.circular(18),
+        child: Padding(
+          padding: const EdgeInsets.all(16),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  CircleAvatar(
+                    backgroundColor: scheme.primaryContainer,
+                    foregroundColor: scheme.onPrimaryContainer,
+                    child: const Icon(Icons.business_outlined),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          job.title,
+                          style: Theme.of(context).textTheme.titleMedium,
+                        ),
+                        const SizedBox(height: 3),
+                        Text(
+                          job.postedBy,
+                          style: Theme.of(context).textTheme.bodySmall
+                              ?.copyWith(color: scheme.onSurfaceVariant),
+                        ),
+                      ],
                     ),
                   ),
-                ),
-                if (tag != null)
-                  Container(
-                    padding: EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                    decoration: BoxDecoration(
-                      color: HabiColors.goldDark,
-                      borderRadius: BorderRadius.circular(8),
+                  if (tag != null)
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 9,
+                        vertical: 5,
+                      ),
+                      decoration: BoxDecoration(
+                        color: scheme.secondaryContainer,
+                        borderRadius: BorderRadius.circular(99),
+                      ),
+                      child: Text(
+                        tag,
+                        style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                          color: scheme.onSecondaryContainer,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
                     ),
+                  if (_isOwner)
+                    PopupMenuButton<String>(
+                      tooltip: 'Manage job',
+                      onSelected: (value) {
+                        if (value == 'edit') {
+                          _edit(context);
+                        } else {
+                          _delete(context);
+                        }
+                      },
+                      itemBuilder: (context) => const [
+                        PopupMenuItem(value: 'edit', child: Text('Edit')),
+                        PopupMenuItem(value: 'delete', child: Text('Delete')),
+                      ],
+                    ),
+                ],
+              ),
+              const SizedBox(height: 14),
+              Text(
+                '${job.setup} · ${job.type} · ${job.location}',
+                style: Theme.of(context).textTheme.bodyMedium,
+              ),
+              const SizedBox(height: 14),
+              Row(
+                children: [
+                  Expanded(
                     child: Text(
-                      tag,
-                      style: TextStyle(
-                        fontSize: 12,
-                        fontWeight: FontWeight.w600,
-                        color: HabiColors.cream,
-                      ),
+                      job.pay,
+                      style: Theme.of(context).textTheme.titleMedium
+                          ?.copyWith(color: scheme.primary),
                     ),
                   ),
-                if (_isOwner)
-                  PopupMenuButton<String>(
-                    icon: Icon(Icons.more_vert, color: HabiColors.cream),
-                    color: HabiColors.navyMid,
-                    onSelected: (value) {
-                      if (value == 'edit') {
-                        _edit(context);
-                      } else {
-                        _delete(context);
-                      }
-                    },
-                    itemBuilder: (context) => [
-                      PopupMenuItem(
-                        value: 'edit',
-                        child: Text(
-                          'Edit',
-                          style: TextStyle(color: HabiColors.cream),
-                        ),
-                      ),
-                      PopupMenuItem(
-                        value: 'delete',
-                        child: Text(
-                          'Delete',
-                          style: TextStyle(color: Color(0xFFE5766B)),
-                        ),
-                      ),
-                    ],
-                  ),
-              ],
-            ),
-            SizedBox(height: 6),
-            Text(
-              '${job.setup} \u2022 ${job.type} \u2022 ${job.location}',
-              style: TextStyle(fontSize: 14, color: HabiColors.cream),
-            ),
-            SizedBox(height: 10),
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                Expanded(
-                  child: Text(
-                    job.pay,
-                    style: TextStyle(
-                      fontSize: 16,
-                      fontWeight: FontWeight.w600,
-                      color: HabiColors.cream,
+                  if (job.employerVerified == true)
+                    Icon(
+                      Icons.verified_rounded,
+                      color: scheme.primary,
+                      size: 19,
                     ),
+                  const SizedBox(width: 6),
+                  Icon(
+                    Icons.arrow_forward_rounded,
+                    color: scheme.onSurfaceVariant,
+                    size: 19,
                   ),
-                ),
-                Text(
-                  'Posted by ${job.postedBy}',
-                  style: TextStyle(fontSize: 13, color: HabiColors.cream),
-                ),
-              ],
-            ),
-          ],
+                ],
+              ),
+            ],
+          ),
         ),
       ),
     );

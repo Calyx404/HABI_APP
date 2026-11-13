@@ -5,7 +5,7 @@ import 'package:habi/backend/firebase_config.dart';
 import 'package:habi/backend/firebase_services.dart';
 import 'package:habi/backend/firebase_setup_screen.dart';
 import 'package:habi/shared/theme/habi_appearance.dart';
-import 'package:habi/shared/theme/habi_colors.dart';
+import 'package:habi/shared/theme/habi_design_system.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -34,22 +34,9 @@ class HabiApp extends StatelessWidget {
         return MaterialApp(
           title: 'HABI',
           debugShowCheckedModeBanner: false,
-          theme: ThemeData(
-            brightness: isDark ? Brightness.dark : Brightness.light,
-            scaffoldBackgroundColor: isDark
-                ? HabiColors.navy
-                : Color(0xFFE8D5B9),
-            colorScheme: isDark
-                ? ColorScheme.dark(
-                    primary: HabiColors.gold,
-                    surface: HabiColors.navy,
-                  )
-                : ColorScheme.light(
-                    primary: HabiColors.goldDark,
-                    surface: Color(0xFFF1E3CE),
-                  ),
-            useMaterial3: true,
-          ),
+          theme: HabiTheme.light,
+          darkTheme: HabiTheme.dark,
+          themeMode: isDark ? ThemeMode.dark : ThemeMode.light,
           home: firebaseError != null || !HabiFirebaseConfig.isConfigured
               ? FirebaseSetupScreen(error: firebaseError)
               : const HabiAuthGate(),

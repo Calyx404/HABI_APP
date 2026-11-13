@@ -4,10 +4,13 @@ import 'package:habi/shared/theme/habi_background.dart';
 
 import 'package:habi/features/messaging/chat_screen.dart';
 import 'package:habi/shared/theme/habi_colors.dart';
+import 'package:habi/shared/theme/habi_design_system.dart';
 import 'package:habi/data/job_store.dart';
 import 'package:habi/data/message_store.dart';
 import 'package:habi/features/jobs/my_applications_screen.dart';
 import 'package:habi/data/notification_store.dart';
+import 'package:habi/features/employer/employer_settings_pages.dart';
+import 'package:habi/features/employer/employer_screen.dart';
 
 /// Notifications: opens from the bell on the Home screen.
 class NotificationsScreen extends StatelessWidget {
@@ -35,6 +38,22 @@ class NotificationsScreen extends StatelessWidget {
       Navigator.of(context).push(
         MaterialPageRoute(
           builder: (_) => MyApplicationsScreen(userName: userName),
+        ),
+      );
+      return;
+    }
+    if (n.kind == NotificationKind.application) {
+      Navigator.of(context).push(
+        MaterialPageRoute<void>(
+          builder: (_) => EmployerScreen(companyName: userName, initialTab: 2),
+        ),
+      );
+      return;
+    }
+    if (n.kind == NotificationKind.verification) {
+      Navigator.of(context).push(
+        MaterialPageRoute<void>(
+          builder: (_) => EmployerProfileEditScreen(companyName: userName),
         ),
       );
       return;
@@ -100,25 +119,24 @@ class NotificationsScreen extends StatelessWidget {
         return Icons.update;
       case NotificationKind.message:
         return Icons.chat_bubble_outline;
+      case NotificationKind.interview:
+        return Icons.event_available_outlined;
+      case NotificationKind.verification:
+        return Icons.verified_user_outlined;
     }
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: HabiColors.navy,
       appBar: AppBar(
-        backgroundColor: HabiColors.navy,
-        foregroundColor: HabiColors.cream,
-        elevation: 0,
         title: Text(
           'Notifications',
-          style: TextStyle(fontWeight: FontWeight.w600),
+          style: Theme.of(context).textTheme.headlineMedium,
         ),
         actions: [
           TextButton(
             onPressed: () => _markAllRead(context),
-            style: TextButton.styleFrom(foregroundColor: HabiColors.gold),
             child: Text('Mark all read'),
           ),
         ],
@@ -131,10 +149,30 @@ class NotificationsScreen extends StatelessWidget {
             child: ListenableBuilder(
               listenable: NotificationStore.instance,
               builder: (context, _) {
-                final items = NotificationStore.instance.listFor(userName);
-                if (items.isEmpty) return _buildEmpty();
+                final store = NotificationStore.instance;
+                final items = store.listFor(userName);
+                if (store.loadError != null) {
+                  return Center(
+                    child: Padding(
+                      padding: const EdgeInsets.all(24),
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Text(store.loadError!, textAlign: TextAlign.center),
+                          const SizedBox(height: 12),
+                          FilledButton.icon(
+                            onPressed: store.retryLoad,
+                            icon: const Icon(Icons.refresh),
+                            label: const Text('Try again'),
+                          ),
+                        ],
+                      ),
+                    ),
+                  );
+                }
+                if (items.isEmpty) return _buildEmpty(context);
                 return ListView.builder(
-                  padding: EdgeInsets.fromLTRB(20, 8, 20, 24),
+                  padding: const EdgeInsets.fromLTRB(20, 12, 20, 28),
                   itemCount: items.length,
                   itemBuilder: (context, i) => _buildItem(context, items[i]),
                 );
@@ -147,111 +185,91 @@ class NotificationsScreen extends StatelessWidget {
   }
 
   Widget _buildItem(BuildContext context, AppNotification n) {
-    return GestureDetector(
-      onTap: () => _open(context, n),
-      child: Container(
-        width: double.infinity,
-        margin: EdgeInsets.only(bottom: 10),
-        padding: EdgeInsets.all(14),
-        decoration: BoxDecoration(
-          color: HabiColors.navy.withAlpha(200),
-          borderRadius: BorderRadius.circular(16),
-          border: Border.all(
-            color: n.read
-                ? HabiColors.cream.withAlpha(60)
-                : HabiColors.gold.withAlpha(160),
+    final scheme = Theme.of(context).colorScheme;
+    return Card(
+      margin: const EdgeInsets.only(bottom: 10),
+      color: n.read ? scheme.surface : scheme.surfaceContainerLow,
+      child: InkWell(
+        onTap: () => _open(context, n),
+        borderRadius: BorderRadius.circular(HabiRadius.md),
+        child: Padding(
+          padding: const EdgeInsets.all(16),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Container(
+                width: 46,
+                height: 46,
+                decoration: BoxDecoration(
+                  color: scheme.primaryContainer,
+                  borderRadius: BorderRadius.circular(HabiRadius.sm),
+                ),
+                child: Icon(_icon(n.kind), color: scheme.primary),
+              ),
+              const SizedBox(width: 14),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        Expanded(
+                          child: Text(
+                            n.title,
+                            style: Theme.of(context).textTheme.titleMedium,
+                          ),
+                        ),
+                        if (!n.read)
+                          Container(
+                            width: 9,
+                            height: 9,
+                            decoration: BoxDecoration(
+                              color: scheme.primary,
+                              shape: BoxShape.circle,
+                            ),
+                          ),
+                      ],
+                    ),
+                    const SizedBox(height: 5),
+                    Text(n.body, style: Theme.of(context).textTheme.bodyMedium),
+                    const SizedBox(height: 8),
+                    Text(
+                      formatTimeAgo(n.time ?? DateTime.now()),
+                      style: Theme.of(context).textTheme.labelMedium
+                          ?.copyWith(color: scheme.onSurfaceVariant),
+                    ),
+                  ],
+                ),
+              ),
+            ],
           ),
-        ),
-        child: Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Container(
-              width: 42,
-              height: 42,
-              decoration: BoxDecoration(
-                color: HabiColors.navyLight,
-                borderRadius: BorderRadius.circular(12),
-              ),
-              child: Icon(_icon(n.kind), color: HabiColors.gold, size: 22),
-            ),
-            SizedBox(width: 14),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
-                    children: [
-                      Expanded(
-                        child: Text(
-                          n.title,
-                          style: TextStyle(
-                            fontSize: 16,
-                            fontWeight: FontWeight.w600,
-                            color: HabiColors.cream,
-                          ),
-                        ),
-                      ),
-                      if (!n.read)
-                        Container(
-                          width: 10,
-                          height: 10,
-                          decoration: BoxDecoration(
-                            color: HabiColors.gold,
-                            shape: BoxShape.circle,
-                          ),
-                        ),
-                    ],
-                  ),
-                  SizedBox(height: 4),
-                  Text(
-                    n.body,
-                    style: TextStyle(
-                      fontSize: 14,
-                      color: HabiColors.cream.withAlpha(220),
-                    ),
-                  ),
-                  SizedBox(height: 6),
-                  Text(
-                    formatTimeAgo(n.time ?? DateTime.now()),
-                    style: TextStyle(
-                      fontSize: 12,
-                      color: HabiColors.cream.withAlpha(150),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ],
         ),
       ),
     );
   }
 
-  Widget _buildEmpty() {
+  Widget _buildEmpty(BuildContext context) {
     return Center(
       child: Padding(
         padding: EdgeInsets.symmetric(horizontal: 32),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(Icons.notifications_none, color: HabiColors.gold, size: 44),
+            Icon(
+              Icons.notifications_none_rounded,
+              color: Theme.of(context).colorScheme.primary,
+              size: 48,
+            ),
             SizedBox(height: 12),
             Text(
               'No notifications yet',
-              style: TextStyle(
-                fontSize: 18,
-                fontWeight: FontWeight.w600,
-                color: HabiColors.cream,
-              ),
+              style: TextStyle(fontSize: 18, fontWeight: FontWeight.w600),
             ),
             SizedBox(height: 6),
             Text(
               'New applications, messages and updates will show up here.',
               textAlign: TextAlign.center,
-              style: TextStyle(
-                fontSize: 14,
-                color: HabiColors.cream.withAlpha(200),
-              ),
+              style: TextStyle(fontSize: 14),
             ),
           ],
         ),

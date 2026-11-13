@@ -1,6 +1,3 @@
-import 'dart:typed_data';
-
-import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 
 import 'package:habi/features/employer/employer_screen.dart';
@@ -8,6 +5,7 @@ import 'package:habi/data/employer_store.dart';
 import 'package:habi/shared/widgets/form_widgets.dart';
 import 'package:habi/shared/theme/habi_background.dart';
 import 'package:habi/shared/theme/habi_colors.dart';
+import 'package:habi/shared/widgets/habi_notification_button.dart';
 
 const _businessRegistrationTypes = [
   'Private Company',
@@ -42,8 +40,6 @@ class _EmployerProfileSetupScreenState
   final _verificationEmail = TextEditingController();
   String? _registrationType;
   String _documentName = '';
-  Uint8List? _documentBytes;
-  bool _isPicking = false;
 
   EmployerAccount? get _account =>
       EmployerStore.instance.byCompanyName(widget.companyName);
@@ -57,7 +53,6 @@ class _EmployerProfileSetupScreenState
       _website.text = account.employerWebsite ?? '';
       _verificationEmail.text = account.verificationEmail ?? '';
       _documentName = account.supportingDocumentName ?? '';
-      _documentBytes = account.supportingDocumentBytes;
       if (_businessRegistrationTypes.contains(
         account.businessRegistrationType ?? '',
       )) {
@@ -72,40 +67,6 @@ class _EmployerProfileSetupScreenState
     _website.dispose();
     _verificationEmail.dispose();
     super.dispose();
-  }
-
-  Future<void> _chooseDocument() async {
-    setState(() => _isPicking = true);
-    try {
-      final file = await FilePicker.pickFile(
-        dialogTitle: 'Choose a supporting business document',
-        type: FileType.custom,
-        allowedExtensions: const ['pdf', 'png', 'jpg', 'jpeg'],
-        windowsOptions: const WindowsOptions(lockParentWindow: true),
-        linuxOptions: const LinuxOptions(lockParentWindow: true),
-      );
-      if (file == null || !mounted) return;
-      final bytes = await file.readAsBytes();
-      if (!mounted) return;
-      if (bytes.isEmpty) {
-        showHabiSnack(
-          context,
-          'The selected file could not be read. Choose it again.',
-        );
-        return;
-      }
-      setState(() {
-        _documentName = file.name;
-        _documentBytes = bytes;
-      });
-    } catch (error, stackTrace) {
-      debugPrint('Business document picker failed: $error\n$stackTrace');
-      if (mounted) {
-        showHabiSnack(context, 'Could not open the file picker. Try again.');
-      }
-    } finally {
-      if (mounted) setState(() => _isPicking = false);
-    }
   }
 
   String? _emailValidator(String? value) {
@@ -140,7 +101,6 @@ class _EmployerProfileSetupScreenState
         businessRegistrationType: _registrationType!,
         businessRegistrationNumber: _registrationNumber.text.trim(),
         supportingDocumentName: _documentName,
-        supportingDocumentBytes: _documentBytes,
         employerWebsite: _website.text.trim(),
         verificationEmail: _verificationEmail.text.trim(),
         profileComplete: true,
@@ -192,6 +152,7 @@ class _EmployerProfileSetupScreenState
       foregroundColor: HabiColors.cream,
       title: Text(widget.isOnboarding ? 'Set Up Your Profile' : 'My Profile'),
       actions: [
+        HabiNotificationButton(userName: widget.companyName),
         if (widget.isOnboarding)
           TextButton(onPressed: _skip, child: Text('Skip')),
       ],
@@ -256,30 +217,8 @@ class _EmployerProfileSetupScreenState
                 ),
                 const SizedBox(height: 18),
                 SectionHeader('Supporting information'),
-                OutlinedButton.icon(
-                  onPressed: _isPicking ? null : _chooseDocument,
-                  icon: _isPicking
-                      ? SizedBox(
-                          width: 18,
-                          height: 18,
-                          child: CircularProgressIndicator(
-                            strokeWidth: 2,
-                            color: HabiColors.gold,
-                          ),
-                        )
-                      : Icon(Icons.upload_file_outlined),
-                  label: Text(
-                    _documentName.isEmpty
-                        ? 'Upload Supporting Business Document'
-                        : _documentName,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                  style: OutlinedButton.styleFrom(
-                    foregroundColor: HabiColors.cream,
-                    side: BorderSide(color: HabiColors.cream.withAlpha(90)),
-                    minimumSize: const Size.fromHeight(52),
-                  ),
+                const Text(
+                  'Document attachments are temporarily unavailable. You can submit registration details and a verification contact for review.',
                 ),
                 const SizedBox(height: 16),
                 _field(

@@ -206,7 +206,11 @@ class _EmployerRegistrationScreenState
       if (uid == null || uid.isEmpty) {
         throw StateError('The employer account was created without a user ID.');
       }
-      JobStore.instance.bindUser(uid, displayName: account.companyName);
+      JobStore.instance.bindUser(
+        uid,
+        displayName: account.companyName,
+        asEmployer: true,
+      );
       MessageStore.instance.bindUser(uid, displayName: account.companyName);
       NotificationStore.instance.bindUser(uid);
       if (!mounted) return;

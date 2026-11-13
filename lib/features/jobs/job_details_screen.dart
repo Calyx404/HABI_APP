@@ -1,11 +1,15 @@
 import 'package:flutter/material.dart';
 
+import 'package:habi/backend/auth_service.dart';
 import 'package:habi/shared/theme/habi_background.dart';
 
 import 'package:habi/features/messaging/chat_sheet.dart';
 import 'package:habi/shared/theme/habi_colors.dart';
 import 'package:habi/shared/widgets/habi_nav_bar.dart';
 import 'package:habi/data/job_store.dart';
+import 'package:habi/data/account_store.dart';
+import 'package:habi/features/jobs/application_resume_dialog.dart';
+import 'package:habi/shared/widgets/habi_notification_button.dart';
 
 /// Job Details.
 class JobDetailsScreen extends StatelessWidget {
@@ -46,41 +50,26 @@ class JobDetailsScreen extends StatelessWidget {
   }
 
   Future<void> _apply(BuildContext context, Job j) async {
-    final ok = await showDialog<bool>(
+    final account = AccountStore.instance.current;
+    if (account == null) {
+      _message(context, 'Your profile is still loading. Please try again.');
+      return;
+    }
+    final confirmed = await showDialog<bool>(
       context: context,
-      builder: (ctx) => AlertDialog(
-        backgroundColor: HabiColors.navyMid,
-        title: Text(
-          'Apply for this job?',
-          style: TextStyle(color: HabiColors.cream),
-        ),
-        content: Text(
-          '"${j.title}" posted by ${j.postedBy}.',
-          style: TextStyle(color: HabiColors.cream.withAlpha(210)),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(ctx).pop(false),
-            child: Text('Cancel'),
-          ),
-          TextButton(
-            onPressed: () => Navigator.of(ctx).pop(true),
-            style: TextButton.styleFrom(foregroundColor: HabiColors.gold),
-            child: Text('Apply'),
-          ),
-        ],
-      ),
+      builder: (_) =>
+          ApplicationResumeDialog(account: account, companyName: j.postedBy),
     );
-    if (ok == true && context.mounted) {
+    if (confirmed == true && context.mounted) {
       try {
-        await JobStore.instance.apply(j.id);
+        await JobStore.instance.apply(
+          j.id,
+          profileSnapshot: account.toPublicProfileMap(),
+        );
         if (context.mounted) _message(context, 'Application submitted.');
-      } catch (_) {
+      } catch (error) {
         if (context.mounted) {
-          _message(
-            context,
-            'Could not submit your application. Please try again.',
-          );
+          _message(context, firebaseProfileErrorMessage(error));
         }
       }
     }
@@ -107,6 +96,7 @@ class JobDetailsScreen extends StatelessWidget {
               style: TextStyle(fontWeight: FontWeight.w600),
             ),
             actions: [
+              HabiNotificationButton(userName: userName),
               IconButton(
                 tooltip: saved ? 'Remove from saved' : 'Save job',
                 onPressed: () async {

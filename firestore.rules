@@ -1,8 +1,21 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
-    function signedIn() {
+    function authenticated() {
       return request.auth != null;
+    }
+
+    function accountActive(uid) {
+      return !exists(/databases/$(database)/documents/users/$(uid))
+        || get(/databases/$(database)/documents/users/$(uid)).data.get('accountStatus', 'active') == 'active';
+    }
+
+    function signedIn() {
+      return authenticated() && accountActive(request.auth.uid);
+    }
+
+    function isAdmin() {
+      return authenticated() && request.auth.token.admin == true;
     }
 
     function roleOf(uid) {
@@ -25,14 +38,236 @@ service cloud.firestore {
       return signedIn() && roleOf(request.auth.uid) == 'jobSeeker';
     }
 
+    function canReadUploadedFile(file) {
+      return signedIn()
+        && (file.ownerUid == request.auth.uid
+          || (isAdmin()
+            && file.kind == 'employerVerification'
+            && get(/databases/$(database)/documents/employer_profiles/$(file.ownerUid)).data.supportingDocumentFileId == file.fileId)
+          || (isEmployer()
+            && file.kind == 'applicationResume'
+            && exists(/databases/$(database)/documents/applications/$(file.applicationId))
+            && get(/databases/$(database)/documents/applications/$(file.applicationId)).data.employerId == request.auth.uid
+            && get(/databases/$(database)/documents/applications/$(file.applicationId)).data.resumeFileId == file.fileId));
+    }
+
+    function canDeleteUploadedFile(file) {
+      return signedIn()
+        && file.ownerUid == request.auth.uid
+        && (file.kind == 'profileResume'
+          || (file.kind == 'applicationResume'
+            && (!exists(/databases/$(database)/documents/applications/$(file.applicationId))
+              || get(/databases/$(database)/documents/applications/$(file.applicationId)).data.resumeFileId != file.fileId))
+          || (file.kind == 'employerVerification'
+            && (!exists(/databases/$(database)/documents/employer_profiles/$(file.ownerUid))
+              || get(/databases/$(database)/documents/employer_profiles/$(file.ownerUid)).data.supportingDocumentFileId != file.fileId)));
+    }
+
+    function hasSafeApplicationProfileSnapshot(snapshot) {
+      return snapshot is map
+        && snapshot.keys().hasOnly([
+          'displayName', 'professionalSummary', 'education',
+          'certifications', 'skills', 'workExperience',
+          'employmentType', 'workArrangement', 'preferredLocation',
+          'availabilityDays', 'availabilityTime', 'beneficiaryCategories',
+          'accessibility', 'accessibilityDetails', 'shareBeneficiary',
+          'shareAccessibility', 'visibility', 'profileComplete'
+        ])
+        && (!('accessibilityDetails' in snapshot.keys())
+          || snapshot.shareAccessibility == true)
+        && (snapshot.shareBeneficiary == true
+          || snapshot.beneficiaryCategories.size() == 0)
+        && (snapshot.shareAccessibility == true
+          || snapshot.accessibility.size() == 0);
+    }
+
+    function hasSafeApplicationJobSnapshot(snapshot) {
+      return snapshot is map
+        && snapshot.keys().hasOnly([
+          'title', 'postedBy', 'location', 'setup', 'type', 'pay',
+          'description', 'experience', 'workSchedule', 'accessibility',
+          'requirements', 'postedAt'
+        ])
+        && snapshot.title is string
+        && snapshot.title.size() > 0
+        && snapshot.title.size() <= 120
+        && snapshot.postedBy is string
+        && snapshot.location is string
+        && snapshot.setup is string
+        && snapshot.type is string
+        && snapshot.pay is string
+        && snapshot.description is string
+        && snapshot.experience is string
+        && snapshot.workSchedule is string
+        && snapshot.accessibility is string
+        && snapshot.requirements is string
+        && snapshot.postedAt is timestamp;
+    }
+
+    function hasOptionalApplicationResume(data, applicationId) {
+      return ((!('resumeFileId' in data.keys())
+          && !('resumeName' in data.keys())
+          && !('resumeSizeBytes' in data.keys())
+          && !('resumeSubmittedAt' in data.keys())
+          && !('resumeConsentAt' in data.keys())
+          && !('resumeStoragePath' in data.keys()))
+        || (data.resumeFileId is string
+          && data.resumeFileId.size() > 0
+          && data.resumeName is string
+          && data.resumeName.size() > 0
+          && data.resumeName.size() <= 128
+          && data.resumeSizeBytes is int
+          && data.resumeSizeBytes > 0
+          && data.resumeSizeBytes <= 10485760
+          && data.resumeSubmittedAt is timestamp
+          && data.resumeConsentAt is timestamp
+          && exists(/databases/$(database)/documents/file_uploads/$(data.resumeFileId))
+          && get(/databases/$(database)/documents/file_uploads/$(data.resumeFileId)).data.kind == 'applicationResume'
+          && get(/databases/$(database)/documents/file_uploads/$(data.resumeFileId)).data.ownerUid == request.auth.uid
+          && get(/databases/$(database)/documents/file_uploads/$(data.resumeFileId)).data.applicationId == applicationId));
+    }
+
+    function validApplicationTransition(from, to) {
+      return (from == 'Submitted' && to in ['Under Review', 'Not Selected', 'Withdrawn'])
+        || (from == 'Under Review' && to in ['Shortlisted', 'Not Selected', 'Withdrawn'])
+        || (from == 'Shortlisted' && to in ['Interview Scheduled', 'Not Selected', 'Withdrawn'])
+        || (from == 'Interview Scheduled' && to in ['Shortlisted', 'Interview Completed', 'Not Selected', 'Withdrawn'])
+        || (from == 'Interview Completed' && to in ['Offer Extended', 'Not Selected', 'Withdrawn'])
+        || (from == 'Offer Extended' && to in ['Hired', 'Not Selected', 'Withdrawn'])
+        || (from == 'Interview' && to in ['Interview Scheduled', 'Interview Completed', 'Hired', 'Not Selected']);
+    }
+
     function isConversationParticipant(data) {
       return signedIn() && request.auth.uid in data.participantIds;
     }
 
+    function validPortfolioUrl(value) {
+      return value is string
+        && (value == ''
+          || value.matches('https://[A-Za-z0-9.-]+(:[0-9]+)?([/?#].*)?'));
+    }
+
+    function validPortfolioProject(data) {
+      return data.keys().hasAll([
+          'ownerUid', 'title', 'summary', 'description', 'category', 'role',
+          'skills', 'technologies', 'responsibilities', 'outcomes',
+          'reflection', 'startedAt', 'endedAt', 'ongoing', 'demoUrl',
+          'repositoryUrl', 'thumbnailUrl', 'thumbnailAltText', 'status',
+          'createdAt', 'updatedAt'
+        ])
+        && data.keys().hasOnly([
+          'ownerUid', 'title', 'summary', 'description', 'category', 'role',
+          'skills', 'technologies', 'responsibilities', 'outcomes',
+          'reflection', 'startedAt', 'endedAt', 'ongoing', 'demoUrl',
+          'repositoryUrl', 'thumbnailUrl', 'thumbnailAltText', 'status',
+          'createdAt', 'updatedAt'
+        ])
+        && data.ownerUid is string
+        && data.title is string && data.title.size() > 0 && data.title.size() <= 120
+        && data.summary is string && data.summary.size() > 0 && data.summary.size() <= 500
+        && data.description is string && data.description.size() > 0 && data.description.size() <= 10000
+        && data.category is string && data.category.size() <= 100
+        && data.role is string && data.role.size() <= 120
+        && data.skills is list && data.skills.size() <= 20
+        && data.technologies is list && data.technologies.size() <= 20
+        && data.responsibilities is string && data.responsibilities.size() <= 2000
+        && data.outcomes is string && data.outcomes.size() <= 2000
+        && data.reflection is string && data.reflection.size() <= 2000
+        && data.startedAt is timestamp
+        && (data.endedAt == null || (data.endedAt is timestamp && data.endedAt >= data.startedAt))
+        && data.ongoing is bool
+        && (!data.ongoing || data.endedAt == null)
+        && validPortfolioUrl(data.demoUrl)
+        && validPortfolioUrl(data.repositoryUrl)
+        && validPortfolioUrl(data.thumbnailUrl)
+        && data.thumbnailAltText is string && data.thumbnailAltText.size() <= 200
+        && (data.thumbnailUrl == '' || data.thumbnailAltText.size() > 0)
+        && data.status in ['draft', 'published', 'archived']
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    function validThreadUrl(value) {
+      return value is string
+        && (value == ''
+          || value.matches('https://[A-Za-z0-9.-]+(:[0-9]+)?([/?#].*)?'));
+    }
+
+    function canReadThread(post) {
+      return signedIn()
+        && (isAdmin()
+          || post.authorUid == request.auth.uid
+          || (post.publicationStatus == 'published'
+            && post.moderationStatus == 'visible'));
+    }
+
+    function visibleThread(postId) {
+      return exists(/databases/$(database)/documents/posts/$(postId))
+        && get(/databases/$(database)/documents/posts/$(postId)).data.publicationStatus == 'published'
+        && get(/databases/$(database)/documents/posts/$(postId)).data.moderationStatus == 'visible';
+    }
+
+    function validThread(data, uid) {
+      return data.keys().hasAll([
+          'authorUid', 'authorName', 'authorHeadline', 'contentType', 'title',
+          'content', 'skills', 'topics', 'externalUrl', 'portfolioProjectId',
+          'challenge', 'approach', 'outcome', 'learning', 'collaboration',
+          'publicationStatus', 'moderationStatus', 'createdAt', 'updatedAt',
+          'publishedAt'
+        ])
+        && data.keys().hasOnly([
+          'authorUid', 'authorName', 'authorHeadline', 'contentType', 'title',
+          'content', 'skills', 'topics', 'externalUrl', 'portfolioProjectId',
+          'challenge', 'approach', 'outcome', 'learning', 'collaboration',
+          'publicationStatus', 'moderationStatus', 'createdAt', 'updatedAt',
+          'publishedAt'
+        ])
+        && data.authorUid == uid
+        && data.authorName is string && data.authorName.size() > 0 && data.authorName.size() <= 120
+        && data.authorName == get(/databases/$(database)/documents/users/$(uid)).data.displayName
+        && data.authorHeadline is string && data.authorHeadline.size() <= 240
+        && data.contentType in [
+          'projectShowcase', 'learningJourney', 'professionalInsight',
+          'careerMilestone', 'questionDiscussion', 'collaborationOpportunity',
+          'communityContribution'
+        ]
+        && data.title is string && data.title.size() <= 160
+        && data.content is string && data.content.size() <= 10000
+        && data.skills is list && data.skills.size() <= 12
+        && data.topics is list && data.topics.size() <= 12
+        && validThreadUrl(data.externalUrl)
+        && (data.portfolioProjectId == null
+          || (data.portfolioProjectId is string
+            && data.portfolioProjectId.size() > 0
+            && data.portfolioProjectId.size() <= 128))
+        && data.challenge is string && data.challenge.size() <= 3000
+        && data.approach is string && data.approach.size() <= 3000
+        && data.outcome is string && data.outcome.size() <= 3000
+        && data.learning is string && data.learning.size() <= 3000
+        && data.collaboration is string && data.collaboration.size() <= 3000
+        && data.publicationStatus in ['draft', 'published', 'deleted']
+        && (data.publicationStatus != 'published' || data.content.size() > 0)
+        && (data.publicationStatus != 'published'
+          || data.contentType != 'projectShowcase'
+          || data.title.size() > 0
+          || data.portfolioProjectId != null)
+        && data.moderationStatus in ['visible', 'hidden']
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp
+        && (data.publishedAt == null || data.publishedAt is timestamp);
+    }
+
+    function validThreadProjectReference(data, uid) {
+      return data.portfolioProjectId == null
+        || (exists(/databases/$(database)/documents/portfolio_projects/$(data.portfolioProjectId))
+          && get(/databases/$(database)/documents/portfolio_projects/$(data.portfolioProjectId)).data.ownerUid == uid
+          && get(/databases/$(database)/documents/portfolio_projects/$(data.portfolioProjectId)).data.status == 'published');
+    }
+
     match /users/{uid} {
-      allow get: if signedIn() && request.auth.uid == uid;
+      allow get: if (authenticated() && request.auth.uid == uid) || isAdmin();
       allow list: if false;
-      allow create: if signedIn()
+      allow create: if authenticated()
         && request.auth.uid == uid
         && request.resource.data.uid == uid
         && request.resource.data.role in ['jobSeeker', 'employer']
@@ -41,27 +276,45 @@ service cloud.firestore {
           'createdAt', 'updatedAt', 'firstName', 'middleName', 'lastName',
           'suffix', 'birthDate', 'sex', 'genderIdentity', 'mobile', 'address',
           'cityProvince', 'barangay', 'beneficiaryCategories',
-          'shareBeneficiary', 'education', 'skills', 'workExperience',
+          'shareBeneficiary', 'professionalSummary', 'education',
+          'certifications', 'skills', 'workExperience',
           'employmentType', 'workArrangement', 'preferredLocation',
           'availabilityDays', 'availabilityTime', 'accessibility',
           'shareAccessibility', 'accessibilityDetails', 'resumeName', 'resumeStoragePath', 'profileDone',
-          'phone', 'companyName'
-        ]);
+          'phone', 'companyName', 'resumeFileId', 'accountStatus'
+        ])
+        && request.resource.data.get('accountStatus', 'active') == 'active';
       allow update: if signedIn()
         && request.auth.uid == uid
         && request.resource.data.uid == uid
         && request.resource.data.role == resource.data.role
+        && request.resource.data.get('accountStatus', 'active') == resource.data.get('accountStatus', 'active')
         && request.resource.data.keys().hasOnly([
           'uid', 'email', 'displayName', 'role', 'profileComplete', 'visibility',
           'createdAt', 'updatedAt', 'firstName', 'middleName', 'lastName',
           'suffix', 'birthDate', 'sex', 'genderIdentity', 'mobile', 'address',
           'cityProvince', 'barangay', 'beneficiaryCategories',
-          'shareBeneficiary', 'education', 'skills', 'workExperience',
+          'shareBeneficiary', 'professionalSummary', 'education',
+          'certifications', 'skills', 'workExperience',
           'employmentType', 'workArrangement', 'preferredLocation',
           'availabilityDays', 'availabilityTime', 'accessibility',
           'shareAccessibility', 'accessibilityDetails', 'resumeName', 'resumeStoragePath', 'profileDone',
-          'phone', 'companyName'
-        ]);
+          'phone', 'companyName', 'resumeFileId', 'accountStatus',
+          'accountStatusUpdatedAt', 'accountStatusUpdatedBy', 'accountStatusAuditId'
+        ])
+        || (isAdmin()
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+            'accountStatus', 'accountStatusUpdatedAt', 'accountStatusUpdatedBy', 'accountStatusAuditId'
+          ])
+          && request.resource.data.accountStatus in ['active', 'suspended']
+          && request.resource.data.accountStatusUpdatedAt == request.time
+          && request.resource.data.accountStatusUpdatedBy == request.auth.uid
+          && request.resource.data.accountStatusAuditId is string
+          && existsAfter(/databases/$(database)/documents/admin_audit/$(request.resource.data.accountStatusAuditId))
+          && getAfter(/databases/$(database)/documents/admin_audit/$(request.resource.data.accountStatusAuditId)).data.targetType == 'user'
+          && getAfter(/databases/$(database)/documents/admin_audit/$(request.resource.data.accountStatusAuditId)).data.targetId == uid
+          && getAfter(/databases/$(database)/documents/admin_audit/$(request.resource.data.accountStatusAuditId)).data.status == request.resource.data.accountStatus
+          && getAfter(/databases/$(database)/documents/admin_audit/$(request.resource.data.accountStatusAuditId)).data.actorId == request.auth.uid);
       allow delete: if false;
 
       match /saved_jobs/{jobId} {
@@ -70,16 +323,101 @@ service cloud.firestore {
           && request.auth.uid == uid
           && request.resource.data.jobId == jobId
           && exists(/databases/$(database)/documents/jobs/$(jobId))
-          && get(/databases/$(database)/documents/jobs/$(jobId)).data.status == 'published';
+          && get(/databases/$(database)/documents/jobs/$(jobId)).data.status == 'published'
+          && get(/databases/$(database)/documents/jobs/$(jobId)).data.moderationStatus == 'approved';
+      }
+
+      match /devices/{deviceId} {
+        allow get, list: if signedIn() && request.auth.uid == uid;
+        allow create, update: if signedIn()
+          && request.auth.uid == uid
+          && deviceId == request.resource.data.fid
+          && request.resource.data.keys().hasOnly(['fid', 'platform', 'updatedAt'])
+          && request.resource.data.fid is string
+          && request.resource.data.fid.size() > 20
+          && request.resource.data.platform in ['android', 'iOS', 'macOS', 'windows', 'linux'];
+        allow delete: if signedIn() && request.auth.uid == uid;
       }
 
       match /notifications/{notificationId} {
+        function validAdminJobNotification() {
+          return isAdmin()
+            && request.resource.data.keys().hasOnly([
+              'kind', 'title', 'body', 'jobId', 'createdAt', 'read'
+            ])
+            && request.resource.data.kind == 'status'
+            && request.resource.data.jobId is string
+            && exists(/databases/$(database)/documents/jobs/$(request.resource.data.jobId))
+            && get(/databases/$(database)/documents/jobs/$(request.resource.data.jobId)).data.ownerId == uid;
+        }
+
+        function validNewApplicationNotification() {
+          let applicationPath = /databases/$(database)/documents/applications/$(request.resource.data.applicationId);
+          return isJobSeeker()
+            && request.resource.data.keys().hasOnly([
+              'kind', 'title', 'body', 'jobId', 'applicationId', 'applicantId',
+              'createdAt', 'read'
+            ])
+            && request.resource.data.kind == 'application'
+            && request.resource.data.title is string
+            && request.resource.data.title.size() > 0
+            && request.resource.data.title.size() <= 120
+            && request.resource.data.body is string
+            && request.resource.data.body.size() > 0
+            && request.resource.data.body.size() <= 1000
+            && request.resource.data.jobId is string
+            && request.resource.data.applicationId == request.resource.data.jobId + '_' + request.auth.uid
+            && notificationId == request.resource.data.applicationId
+            && request.resource.data.applicantId == request.auth.uid
+            && existsAfter(applicationPath)
+            && getAfter(applicationPath).data.applicantId == request.auth.uid
+            && getAfter(applicationPath).data.employerId == uid
+            && getAfter(applicationPath).data.status == 'Submitted'
+            && request.resource.data.createdAt == request.time
+            && request.resource.data.read == false;
+        }
+
+        function validApplicationStatusNotification() {
+          let applicationPath = /databases/$(database)/documents/applications/$(request.resource.data.applicationId);
+          return isEmployer()
+            && request.resource.data.keys().hasOnly([
+              'kind', 'title', 'body', 'jobId', 'applicationId',
+              'applicationStatus', 'createdAt', 'read'
+            ])
+            && request.resource.data.kind == 'status'
+            && request.resource.data.title is string
+            && request.resource.data.title.size() > 0
+            && request.resource.data.title.size() <= 120
+            && request.resource.data.body is string
+            && request.resource.data.body.size() > 0
+            && request.resource.data.body.size() <= 1000
+            && request.resource.data.jobId is string
+            && request.resource.data.applicationStatus is string
+            && request.resource.data.applicationId == request.resource.data.jobId + '_' + uid
+            && existsAfter(applicationPath)
+            && getAfter(applicationPath).data.applicantId == uid
+            && getAfter(applicationPath).data.employerId == request.auth.uid
+            && getAfter(applicationPath).data.status == request.resource.data.applicationStatus
+            && getAfter(applicationPath).data.updatedAt == request.time
+            && request.resource.data.createdAt == request.time
+            && request.resource.data.read == false;
+        }
+
         allow get, list: if signedIn() && request.auth.uid == uid;
+        allow create: if (validAdminJobNotification()
+          && request.resource.data.title is string
+          && request.resource.data.title.size() <= 120
+          && request.resource.data.body is string
+          && request.resource.data.body.size() <= 1000
+          && request.resource.data.createdAt == request.time
+          && request.resource.data.read == false)
+          || validNewApplicationNotification()
+          || validApplicationStatusNotification();
         allow update: if signedIn()
           && request.auth.uid == uid
           && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['read'])
           && request.resource.data.read is bool;
-        allow create, delete: if false;
+        allow delete: if false;
       }
 
       match /settings/{settingsId} {
@@ -90,7 +428,7 @@ service cloud.firestore {
           && settingsId == 'preferences'
           && request.resource.data.keys().hasOnly([
             'jobAlerts', 'applicationUpdates', 'messages', 'trainingReminders',
-            'darkMode', 'updatedAt'
+            'darkMode', 'pushEnabled', 'updatedAt'
           ]);
         allow delete: if false;
       }
@@ -114,12 +452,13 @@ service cloud.firestore {
     match /seeker_profiles/{uid} {
       allow get, list: if signedIn()
         && (request.auth.uid == uid
-          || (isEmployer() && resource.data.visibility == true));
+          || resource.data.visibility == true);
       allow create, update: if signedIn()
         && request.auth.uid == uid
         && request.resource.data.uid == uid
         && request.resource.data.keys().hasOnly([
-          'uid', 'displayName', 'education', 'skills', 'workExperience',
+          'uid', 'displayName', 'professionalSummary', 'education',
+          'certifications', 'skills', 'workExperience',
           'employmentType', 'workArrangement', 'preferredLocation',
           'availabilityDays', 'availabilityTime', 'beneficiaryCategories',
           'accessibility', 'accessibilityDetails', 'shareBeneficiary', 'shareAccessibility',
@@ -129,7 +468,7 @@ service cloud.firestore {
     }
 
     match /employer_profiles/{uid} {
-      allow get, list: if signedIn() && request.auth.uid == uid;
+      allow get, list: if signedIn() && (request.auth.uid == uid || isAdmin());
       // New employer accounts write users/{uid} and employer_profiles/{uid}
       // in one batch. Use getAfter so this rule can verify the role being
       // created in that same atomic write.
@@ -141,11 +480,13 @@ service cloud.firestore {
           'contactFirstName', 'contactLastName', 'position', 'phone',
           'address', 'city', 'description', 'businessRegistrationType',
           'businessRegistrationNumber', 'supportingDocumentName',
-          'supportingDocumentStoragePath', 'employerWebsite',
-          'verificationEmail', 'profileComplete', 'displayName', 'visibility',
+          'supportingDocumentStoragePath', 'supportingDocumentFileId', 'employerWebsite',
+          'verificationEmail', 'verificationStatus', 'profileComplete',
+          'displayName', 'visibility',
           'createdAt', 'updatedAt'
         ])
-        && request.resource.data.uid == uid;
+        && request.resource.data.uid == uid
+        && request.resource.data.verificationStatus == 'pending';
       allow update: if signedIn()
         && request.auth.uid == uid
         && isEmployer()
@@ -155,28 +496,312 @@ service cloud.firestore {
           'contactFirstName', 'contactLastName', 'position', 'phone',
           'address', 'city', 'description', 'businessRegistrationType',
           'businessRegistrationNumber', 'supportingDocumentName',
-          'supportingDocumentStoragePath', 'employerWebsite',
-          'verificationEmail', 'profileComplete', 'displayName', 'visibility',
+          'supportingDocumentStoragePath', 'supportingDocumentFileId', 'employerWebsite',
+          'verificationEmail', 'verificationStatus', 'verificationReason',
+          'verificationReviewerId', 'verificationUpdatedAt',
+          'profileComplete', 'displayName', 'visibility',
           'createdAt', 'updatedAt'
-        ]);
+        ])
+        && request.resource.data.verificationStatus
+          == resource.data.get('verificationStatus', 'pending')
+        && request.resource.data.get('verificationReason', '')
+          == resource.data.get('verificationReason', '')
+        && request.resource.data.get('verificationReviewerId', '')
+          == resource.data.get('verificationReviewerId', '')
+        && request.resource.data.get('verificationUpdatedAt', null)
+          == resource.data.get('verificationUpdatedAt', null);
+      allow delete: if false;
+
+      match /verification_history/{entryId} {
+        allow get, list: if isAdmin() || (isEmployer() && request.auth.uid == uid);
+        allow create, update, delete: if false;
+      }
+    }
+
+    match /admin_audit/{auditId} {
+      allow get, list: if isAdmin();
+      allow create: if isAdmin()
+        && request.resource.data.keys().hasOnly([
+          'action', 'targetType', 'targetId', 'reviewerId', 'actorId',
+          'previousStatus', 'status', 'reason', 'createdAt'
+        ])
+        && request.resource.data.actorId == request.auth.uid
+        && request.resource.data.reviewerId == request.auth.uid
+        && request.resource.data.targetType in ['job', 'user']
+        && request.resource.data.targetId is string
+        && ((request.resource.data.targetType == 'job'
+            && request.resource.data.action in [
+              'job_moderation_approved', 'job_moderation_changesRequested',
+              'job_moderation_rejected', 'job_moderation_hidden',
+              'job_legacy_migration'
+            ])
+          || (request.resource.data.targetType == 'user'
+            && request.resource.data.action in ['user_account_suspended', 'user_account_restored']))
+        && request.resource.data.reason is string
+        && request.resource.data.reason.size() <= 1000
+        && (request.resource.data.targetType != 'user'
+          || (existsAfter(/databases/$(database)/documents/users/$(request.resource.data.targetId))
+            && getAfter(/databases/$(database)/documents/users/$(request.resource.data.targetId)).data.accountStatus == request.resource.data.status
+            && getAfter(/databases/$(database)/documents/users/$(request.resource.data.targetId)).data.accountStatusAuditId == auditId
+            && existsAfter(/databases/$(database)/documents/admin_user_directory/$(request.resource.data.targetId))
+            && getAfter(/databases/$(database)/documents/admin_user_directory/$(request.resource.data.targetId)).data.accountStatus == request.resource.data.status
+            && getAfter(/databases/$(database)/documents/admin_user_directory/$(request.resource.data.targetId)).data.statusAuditId == auditId))
+        && request.resource.data.createdAt == request.time;
+      allow update, delete: if false;
+    }
+
+    match /admin_user_directory/{userId} {
+      allow get, list: if isAdmin();
+      allow create: if signedIn()
+        && request.auth.uid == userId
+        && request.resource.data.keys().hasOnly([
+          'uid', 'email', 'displayName', 'role', 'accountStatus', 'createdAt', 'updatedAt'
+        ])
+        && request.resource.data.uid == userId
+        && request.resource.data.role == getAfter(/databases/$(database)/documents/users/$(userId)).data.role
+        && request.resource.data.email == getAfter(/databases/$(database)/documents/users/$(userId)).data.email
+        && request.resource.data.displayName == getAfter(/databases/$(database)/documents/users/$(userId)).data.displayName
+        && request.resource.data.accountStatus == 'active'
+        && request.resource.data.createdAt is timestamp
+        && request.resource.data.updatedAt == request.time;
+      allow update: if (signedIn()
+          && request.auth.uid == userId
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+            'email', 'displayName', 'updatedAt'
+          ])
+          && request.resource.data.uid == resource.data.uid
+          && request.resource.data.role == resource.data.role
+          && request.resource.data.accountStatus == resource.data.accountStatus
+          && request.resource.data.updatedAt == request.time)
+        || (isAdmin()
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+            'accountStatus', 'statusChangedAt', 'statusChangedBy', 'statusAuditId', 'updatedAt'
+          ])
+          && request.resource.data.accountStatus in ['active', 'suspended']
+          && request.resource.data.statusChangedAt == request.time
+          && request.resource.data.statusChangedBy == request.auth.uid
+          && request.resource.data.statusAuditId is string
+          && request.resource.data.updatedAt == request.time
+          && existsAfter(/databases/$(database)/documents/admin_audit/$(request.resource.data.statusAuditId))
+          && getAfter(/databases/$(database)/documents/admin_audit/$(request.resource.data.statusAuditId)).data.targetType == 'user'
+          && getAfter(/databases/$(database)/documents/admin_audit/$(request.resource.data.statusAuditId)).data.targetId == userId
+          && getAfter(/databases/$(database)/documents/admin_audit/$(request.resource.data.statusAuditId)).data.status == request.resource.data.accountStatus
+          && getAfter(/databases/$(database)/documents/admin_audit/$(request.resource.data.statusAuditId)).data.actorId == request.auth.uid);
       allow delete: if false;
     }
 
     match /jobs/{jobId} {
       allow get, list: if signedIn()
-        && (resource.data.status == 'published'
+        && (isAdmin()
+          || (resource.data.status == 'published'
+            && resource.data.moderationStatus == 'approved')
           || resource.data.ownerId == request.auth.uid);
       allow create: if isEmployer()
+        && get(/databases/$(database)/documents/employer_profiles/$(request.auth.uid)).data.get('verificationStatus', 'pending') != 'suspended'
         && request.resource.data.ownerId == request.auth.uid
         && request.resource.data.status in ['draft', 'published']
+        && request.resource.data.employerVerified is bool
+        && request.resource.data.employerVerified
+          == (get(/databases/$(database)/documents/employer_profiles/$(request.auth.uid)).data.get('verificationStatus', 'pending') == 'verified')
         && request.resource.data.title is string
         && request.resource.data.title.size() > 0
-        && request.resource.data.title.size() <= 120;
+        && request.resource.data.title.size() <= 120
+        && ((request.resource.data.status == 'draft'
+            && !('moderationStatus' in request.resource.data.keys()))
+          || (request.resource.data.status == 'published'
+            && request.resource.data.moderationStatus == 'pending_review'));
       allow update: if isEmployer()
+        && get(/databases/$(database)/documents/employer_profiles/$(request.auth.uid)).data.get('verificationStatus', 'pending') != 'suspended'
         && resource.data.ownerId == request.auth.uid
         && request.resource.data.ownerId == resource.data.ownerId
-        && request.resource.data.status in ['draft', 'published', 'closed', 'archived'];
+        && request.resource.data.status in ['draft', 'published', 'closed', 'archived']
+        && request.resource.data.employerVerified is bool
+        && request.resource.data.employerVerified
+          == (get(/databases/$(database)/documents/employer_profiles/$(request.auth.uid)).data.get('verificationStatus', 'pending') == 'verified')
+        && (resource.data.status == 'draft'
+            && request.resource.data.status == 'published'
+            && request.resource.data.moderationStatus == 'pending_review')
+          || (resource.data.status == 'draft'
+            && request.resource.data.status == 'draft'
+            && !('moderationStatus' in request.resource.data.keys())
+            && !('moderationStatus' in resource.data.keys()))
+          || (resource.data.status != 'draft'
+            && request.resource.data.moderationStatus == resource.data.get('moderationStatus', 'pending_review'))
+        && (resource.data.get('moderationStatus', 'pending_review') != 'approved'
+          || !request.resource.data.diff(resource.data).affectedKeys().hasAny([
+            'title', 'setup', 'type', 'location', 'pay', 'description',
+            'experience', 'workSchedule', 'accessibility', 'requirements'
+          ]))
+        && !request.resource.data.diff(resource.data).affectedKeys().hasAny([
+          'moderationReason', 'moderationBy',
+          'moderationUpdatedAt', 'moderationAuditId'
+        ])
+        && (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['moderationStatus'])
+          || (resource.data.status == 'draft'
+            && request.resource.data.status == 'published'
+            && request.resource.data.moderationStatus == 'pending_review'))
+        || (isAdmin()
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+            'moderationStatus', 'moderationReason', 'moderationBy',
+            'moderationUpdatedAt', 'moderationAuditId'
+          ])
+          && request.resource.data.moderationStatus in ['pending_review', 'approved', 'changesRequested', 'rejected', 'hidden']
+          && request.resource.data.moderationReason is string
+          && request.resource.data.moderationReason.size() <= 1000
+          && request.resource.data.moderationBy == request.auth.uid
+          && request.resource.data.moderationUpdatedAt == request.time
+          && request.resource.data.moderationAuditId is string
+          && existsAfter(/databases/$(database)/documents/admin_audit/$(request.resource.data.moderationAuditId))
+          && getAfter(/databases/$(database)/documents/admin_audit/$(request.resource.data.moderationAuditId)).data.targetId == jobId
+          && getAfter(/databases/$(database)/documents/admin_audit/$(request.resource.data.moderationAuditId)).data.actorId == request.auth.uid
+          && getAfter(/databases/$(database)/documents/admin_audit/$(request.resource.data.moderationAuditId)).data.status == request.resource.data.moderationStatus);
       allow delete: if false;
+    }
+
+    match /portfolio_projects/{projectId} {
+      function canReadProject(project) {
+        return isAdmin()
+          || project.ownerUid == request.auth.uid
+          || (project.status == 'published'
+            && exists(/databases/$(database)/documents/seeker_profiles/$(project.ownerUid))
+            && get(/databases/$(database)/documents/seeker_profiles/$(project.ownerUid)).data.visibility == true);
+      }
+
+      allow get: if signedIn()
+        && (!exists(/databases/$(database)/documents/portfolio_projects/$(projectId))
+          || canReadProject(resource.data));
+      allow list: if signedIn() && canReadProject(resource.data);
+
+      allow create: if isJobSeeker()
+        && request.resource.data.ownerUid == request.auth.uid
+        && validPortfolioProject(request.resource.data)
+        && request.resource.data.status in ['draft', 'published']
+        && request.resource.data.createdAt == request.time
+        && request.resource.data.updatedAt == request.time;
+
+      allow update: if isJobSeeker()
+        && resource.data.ownerUid == request.auth.uid
+        && request.resource.data.ownerUid == resource.data.ownerUid
+        && request.resource.data.createdAt == resource.data.createdAt
+        && validPortfolioProject(request.resource.data)
+        && request.resource.data.updatedAt == request.time
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+          'title', 'summary', 'description', 'category', 'role', 'skills',
+          'technologies', 'responsibilities', 'outcomes', 'reflection',
+          'startedAt', 'endedAt', 'ongoing', 'demoUrl', 'repositoryUrl',
+          'thumbnailUrl', 'thumbnailAltText', 'status', 'updatedAt'
+        ])
+        && (resource.data.status != 'archived'
+          || request.resource.data.status == 'archived');
+
+      allow delete: if isJobSeeker() && resource.data.ownerUid == request.auth.uid;
+    }
+
+    match /posts/{postId} {
+      allow get: if signedIn()
+        && (!exists(/databases/$(database)/documents/posts/$(postId))
+          || canReadThread(resource.data));
+      allow list: if canReadThread(resource.data);
+
+      allow create: if signedIn()
+        && request.resource.data.publicationStatus in ['draft', 'published']
+        && request.resource.data.moderationStatus == 'visible'
+        && validThread(request.resource.data, request.auth.uid)
+        && request.resource.data.createdAt == request.time
+        && request.resource.data.updatedAt == request.time
+        && ((request.resource.data.publicationStatus == 'draft'
+            && request.resource.data.publishedAt == null)
+          || (request.resource.data.publicationStatus == 'published'
+            && request.resource.data.content.size() > 0
+            && request.resource.data.publishedAt == request.time))
+        && validThreadProjectReference(request.resource.data, request.auth.uid);
+
+      allow update: if signedIn()
+        && resource.data.authorUid == request.auth.uid
+        && validThread(request.resource.data, request.auth.uid)
+        && request.resource.data.authorUid == resource.data.authorUid
+        && request.resource.data.createdAt == resource.data.createdAt
+        && request.resource.data.moderationStatus == resource.data.moderationStatus
+        && request.resource.data.updatedAt == request.time
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+          'authorName', 'authorHeadline', 'contentType', 'title', 'content',
+          'skills', 'topics', 'externalUrl', 'portfolioProjectId', 'challenge',
+          'approach', 'outcome', 'learning', 'collaboration',
+          'publicationStatus', 'publishedAt', 'updatedAt'
+        ])
+        && ((resource.data.publicationStatus == 'draft'
+            && request.resource.data.publicationStatus == 'draft'
+            && request.resource.data.publishedAt == null)
+          || (resource.data.publicationStatus == 'draft'
+            && request.resource.data.publicationStatus == 'published'
+            && request.resource.data.content.size() > 0
+            && request.resource.data.publishedAt == request.time)
+          || (resource.data.publicationStatus == 'draft'
+            && request.resource.data.publicationStatus == 'deleted'
+            && request.resource.data.publishedAt == null)
+          || (resource.data.publicationStatus == 'published'
+            && request.resource.data.publicationStatus == 'published'
+            && request.resource.data.publishedAt == resource.data.publishedAt)
+          || (resource.data.publicationStatus == 'published'
+            && request.resource.data.publicationStatus == 'deleted'
+            && request.resource.data.publishedAt == resource.data.publishedAt))
+        && (request.resource.data.portfolioProjectId == resource.data.portfolioProjectId
+          || validThreadProjectReference(request.resource.data, request.auth.uid));
+      // A soft delete makes the post and all nested interactions unreadable to
+      // ordinary users without leaving publicly reachable subcollections.
+      allow delete: if false;
+
+      match /comments/{commentId} {
+        function canReadCommentParent() {
+          return visibleThread(postId);
+        }
+
+        allow get, list: if isAdmin() || canReadCommentParent();
+        allow create: if signedIn()
+          && canReadCommentParent()
+          && request.resource.data.keys().hasOnly([
+            'authorUid', 'authorName', 'body', 'createdAt', 'updatedAt'
+          ])
+          && request.resource.data.authorUid == request.auth.uid
+          && request.resource.data.authorName == get(/databases/$(database)/documents/users/$(request.auth.uid)).data.displayName
+          && request.resource.data.body is string
+          && request.resource.data.body.size() > 0
+          && request.resource.data.body.size() <= 2000
+          && request.resource.data.createdAt == request.time
+          && request.resource.data.updatedAt == request.time;
+        allow update: if signedIn()
+          && canReadCommentParent()
+          && resource.data.authorUid == request.auth.uid
+          && request.resource.data.authorUid == resource.data.authorUid
+          && request.resource.data.authorName == resource.data.authorName
+          && request.resource.data.createdAt == resource.data.createdAt
+          && request.resource.data.body is string
+          && request.resource.data.body.size() > 0
+          && request.resource.data.body.size() <= 2000
+          && request.resource.data.updatedAt == request.time
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['body', 'updatedAt']);
+        allow delete: if isAdmin()
+          || (signedIn() && canReadCommentParent()
+            && resource.data.authorUid == request.auth.uid);
+      }
+
+      match /reactions/{userUid} {
+        allow get, list: if isAdmin() || visibleThread(postId);
+        allow create: if signedIn()
+          && visibleThread(postId)
+          && userUid == request.auth.uid
+          && request.resource.data.keys().hasOnly([
+            'userUid', 'reactionType', 'createdAt'
+          ])
+          && request.resource.data.userUid == request.auth.uid
+          && request.resource.data.reactionType == 'support'
+          && request.resource.data.createdAt == request.time;
+        allow update: if false;
+        allow delete: if signedIn()
+          && visibleThread(postId)
+          && userUid == request.auth.uid
+          && resource.data.userUid == request.auth.uid;
+      }
     }
 
     match /applications/{applicationId} {
@@ -186,19 +811,126 @@ service cloud.firestore {
       allow create: if isJobSeeker()
         && applicationId == request.resource.data.jobId + '_' + request.auth.uid
         && request.resource.data.applicantId == request.auth.uid
-        && request.resource.data.status == 'Under Review'
+        && request.resource.data.status == 'Submitted'
         && request.resource.data.jobId is string
+        && hasOptionalApplicationResume(request.resource.data, applicationId)
+        && request.resource.data.profileSnapshot is map
+        && hasSafeApplicationProfileSnapshot(request.resource.data.profileSnapshot)
+        && request.resource.data.jobSnapshot is map
+        && hasSafeApplicationJobSnapshot(request.resource.data.jobSnapshot)
+        && request.resource.data.keys().hasOnly([
+          'jobId', 'applicantId', 'applicantName', 'employerId', 'jobTitle',
+          'status', 'appliedAt', 'updatedAt', 'resumeName',
+          'resumeSizeBytes', 'resumeSubmittedAt', 'resumeConsentAt',
+          'profileSnapshot', 'jobSnapshot', 'resumeFileId'
+        ])
         && exists(/databases/$(database)/documents/jobs/$(request.resource.data.jobId))
         && get(/databases/$(database)/documents/jobs/$(request.resource.data.jobId)).data.status == 'published'
+        && get(/databases/$(database)/documents/jobs/$(request.resource.data.jobId)).data.moderationStatus == 'approved'
         && request.resource.data.employerId
           == get(/databases/$(database)/documents/jobs/$(request.resource.data.jobId)).data.ownerId;
       allow update: if isEmployer()
         && resource.data.employerId == request.auth.uid
         && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
-          'status', 'statusTitle', 'statusMessage', 'updatedAt'
+          'status', 'statusTitle', 'statusMessage', 'updatedAt', 'interviewId',
+          'statusNotificationId'
         ])
-        && request.resource.data.status in ['Under Review', 'Interview', 'Hired', 'Not Selected'];
+        && validApplicationTransition(resource.data.status, request.resource.data.status)
+        && request.resource.data.statusNotificationId is string
+        && request.resource.data.statusNotificationId.size() > 0
+        && existsAfter(/databases/$(database)/documents/users/$(resource.data.applicantId)/notifications/$(request.resource.data.statusNotificationId))
+        && getAfter(/databases/$(database)/documents/users/$(resource.data.applicantId)/notifications/$(request.resource.data.statusNotificationId)).data.kind == 'status'
+        && getAfter(/databases/$(database)/documents/users/$(resource.data.applicantId)/notifications/$(request.resource.data.statusNotificationId)).data.applicationId == applicationId
+        && getAfter(/databases/$(database)/documents/users/$(resource.data.applicantId)/notifications/$(request.resource.data.statusNotificationId)).data.applicationStatus == request.resource.data.status
+        && getAfter(/databases/$(database)/documents/users/$(resource.data.applicantId)/notifications/$(request.resource.data.statusNotificationId)).data.createdAt == request.time
+        && (request.resource.data.status != 'Interview Scheduled'
+          || (request.resource.data.interviewId is string
+            && existsAfter(/databases/$(database)/documents/interviews/$(request.resource.data.interviewId))))
+        && (request.resource.data.status != 'Interview Completed'
+          || getAfter(/databases/$(database)/documents/interviews/$(resource.data.interviewId)).data.status == 'completed')
+        && (request.resource.data.status != 'Shortlisted'
+          || resource.data.status != 'Interview Scheduled'
+          || getAfter(/databases/$(database)/documents/interviews/$(resource.data.interviewId)).data.status == 'cancelled');
       allow delete: if false;
+    }
+
+    match /interviews/{interviewId} {
+      allow get, list: if signedIn()
+        && (resource.data.applicantId == request.auth.uid
+          || resource.data.employerId == request.auth.uid);
+      allow create: if isEmployer()
+        && request.resource.data.keys().hasOnly([
+          'interviewId', 'applicationId', 'jobId', 'employerId', 'applicantId',
+          'startsAt', 'endsAt', 'format', 'locationOrLink', 'instructions',
+          'createdBy', 'status', 'applicantResponse', 'applicantResponseNote',
+          'createdAt', 'updatedAt', 'jobTitle'
+        ])
+        && request.resource.data.interviewId == interviewId
+        && request.resource.data.employerId == request.auth.uid
+        && request.resource.data.createdBy == request.auth.uid
+        && request.resource.data.status == 'scheduled'
+        && request.resource.data.applicantResponse == 'pending'
+        && request.resource.data.format in ['In-person', 'Online', 'Phone']
+        && request.resource.data.startsAt is timestamp
+        && request.resource.data.endsAt is timestamp
+        && request.resource.data.endsAt > request.resource.data.startsAt
+        && exists(/databases/$(database)/documents/applications/$(request.resource.data.applicationId))
+        && get(/databases/$(database)/documents/applications/$(request.resource.data.applicationId)).data.jobId == request.resource.data.jobId
+        && get(/databases/$(database)/documents/applications/$(request.resource.data.applicationId)).data.employerId == request.auth.uid
+        && get(/databases/$(database)/documents/applications/$(request.resource.data.applicationId)).data.applicantId == request.resource.data.applicantId
+        && getAfter(/databases/$(database)/documents/applications/$(request.resource.data.applicationId)).data.status == 'Interview Scheduled';
+      allow update: if signedIn()
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+          'status', 'applicantResponse', 'applicantResponseNote', 'updatedAt',
+          'startsAt', 'endsAt', 'format', 'locationOrLink', 'instructions'
+        ])
+        && request.resource.data.applicationId == resource.data.applicationId
+        && request.resource.data.employerId == resource.data.employerId
+        && request.resource.data.applicantId == resource.data.applicantId
+        && ((request.auth.uid == resource.data.applicantId
+            && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+              'applicantResponse', 'applicantResponseNote', 'updatedAt'
+            ])
+            && request.resource.data.status == resource.data.status
+            && request.resource.data.applicantResponse in ['confirmed', 'rescheduleRequested', 'declined'])
+          || (request.auth.uid == resource.data.employerId
+            && isEmployer()
+            && request.resource.data.applicantResponse == resource.data.applicantResponse
+            && request.resource.data.status in ['scheduled', 'cancelled', 'completed']
+            && request.resource.data.format in ['In-person', 'Online', 'Phone']
+            && request.resource.data.startsAt is timestamp
+            && request.resource.data.endsAt is timestamp
+            && request.resource.data.endsAt > request.resource.data.startsAt
+            && (request.resource.data.status != 'completed'
+              || getAfter(/databases/$(database)/documents/applications/$(resource.data.applicationId)).data.status == 'Interview Completed')
+            && (request.resource.data.status != 'cancelled'
+              || getAfter(/databases/$(database)/documents/applications/$(resource.data.applicationId)).data.status == 'Shortlisted')));
+      allow delete: if false;
+    }
+
+    // Legacy file records remain readable to preserve existing data. New file
+    // writes are disabled; Firestore is not used as a file storage service.
+    match /file_uploads/{fileId} {
+      allow get: if canReadUploadedFile(resource.data);
+      allow list: if false;
+      allow create: if false;
+      allow update: if false;
+      allow delete: if canDeleteUploadedFile(resource.data);
+
+      match /chunks/{chunkId} {
+        function parentBefore() {
+          return get(/databases/$(database)/documents/file_uploads/$(fileId)).data;
+        }
+        function parentAfter() {
+          return getAfter(/databases/$(database)/documents/file_uploads/$(fileId)).data;
+        }
+        allow get, list: if exists(/databases/$(database)/documents/file_uploads/$(fileId))
+          && canReadUploadedFile(parentBefore());
+        allow create: if false;
+        allow update: if false;
+        allow delete: if exists(/databases/$(database)/documents/file_uploads/$(fileId))
+          && canDeleteUploadedFile(parentBefore());
+      }
     }
 
     match /conversations/{conversationId} {
@@ -220,7 +952,8 @@ service cloud.firestore {
         && (
           (request.auth.uid == request.resource.data.applicantId
             && isJobSeeker()
-            && get(/databases/$(database)/documents/jobs/$(request.resource.data.jobId)).data.status == 'published')
+            && get(/databases/$(database)/documents/jobs/$(request.resource.data.jobId)).data.status == 'published'
+            && get(/databases/$(database)/documents/jobs/$(request.resource.data.jobId)).data.moderationStatus == 'approved')
           || (exists(/databases/$(database)/documents/applications/$(request.resource.data.jobId + '_' + request.resource.data.applicantId))
             && get(/databases/$(database)/documents/applications/$(request.resource.data.jobId + '_' + request.resource.data.applicantId)).data.employerId
               == request.resource.data.posterId)

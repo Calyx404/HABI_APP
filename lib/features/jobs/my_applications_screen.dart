@@ -6,7 +6,9 @@ import 'package:habi/shared/theme/habi_colors.dart';
 import 'package:habi/shared/widgets/habi_nav_bar.dart';
 import 'package:habi/features/jobs/job_details_screen.dart';
 import 'package:habi/data/job_store.dart';
+import 'package:habi/data/interview_store.dart';
 import 'package:habi/features/jobs/jobs_screen.dart';
+import 'package:habi/shared/widgets/habi_notification_button.dart';
 
 String _formatDate(DateTime d) {
   const months = [
@@ -52,6 +54,7 @@ class MyApplicationsScreen extends StatelessWidget {
           'My Applications',
           style: TextStyle(fontWeight: FontWeight.w600),
         ),
+        actions: [HabiNotificationButton(userName: userName)],
       ),
       body: Stack(
         fit: StackFit.expand,
@@ -62,9 +65,29 @@ class MyApplicationsScreen extends StatelessWidget {
               listenable: JobStore.instance,
               builder: (context, _) {
                 final store = JobStore.instance;
-                final apps = store.applications
-                    .where((a) => store.byId(a.jobId) != null)
-                    .toList();
+                final apps = store.applications;
+                if (store.isLoading) {
+                  return const Center(child: CircularProgressIndicator());
+                }
+                if (store.loadError != null) {
+                  return Center(
+                    child: Padding(
+                      padding: const EdgeInsets.all(24),
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Text(store.loadError!, textAlign: TextAlign.center),
+                          const SizedBox(height: 12),
+                          FilledButton.icon(
+                            onPressed: store.retryLoad,
+                            icon: const Icon(Icons.refresh),
+                            label: const Text('Try again'),
+                          ),
+                        ],
+                      ),
+                    ),
+                  );
+                }
                 if (apps.isEmpty) return _buildEmpty(context);
                 return ListView(
                   padding: EdgeInsets.fromLTRB(20, 8, 20, 24),
@@ -82,8 +105,11 @@ class MyApplicationsScreen extends StatelessWidget {
                     for (final a in apps)
                       _ApplicationCard(
                         application: a,
-                        job: store.byId(a.jobId)!,
-                        onTap: () => _openJob(context, store.byId(a.jobId)!),
+                        job: store.jobForApplication(a),
+                        isHistorical: store.byId(a.jobId) == null,
+                        onTap: store.byId(a.jobId) == null
+                            ? null
+                            : () => _openJob(context, store.byId(a.jobId)!),
                       ),
                   ],
                 );
@@ -153,15 +179,17 @@ class _ApplicationCard extends StatelessWidget {
   const _ApplicationCard({
     required this.application,
     required this.job,
+    required this.isHistorical,
     required this.onTap,
   });
 
   final Application application;
   final Job job;
-  final VoidCallback onTap;
+  final bool isHistorical;
+  final VoidCallback? onTap;
 
   Color get _badgeColor {
-    switch (application.status) {
+    switch (applicationStatusLabel(application.status)) {
       case 'Interview':
         return Color(0xFF3B6FD4);
       case 'Hired':
@@ -223,7 +251,9 @@ class _ApplicationCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final stage = kStatusSteps.indexOf(application.status);
+    final stage = kStatusSteps.indexOf(
+      applicationStatusLabel(application.status),
+    );
     return GestureDetector(
       onTap: onTap,
       child: Container(
@@ -257,7 +287,7 @@ class _ApplicationCard extends StatelessWidget {
                     borderRadius: BorderRadius.circular(8),
                   ),
                   child: Text(
-                    application.status,
+                    applicationStatusLabel(application.status),
                     style: TextStyle(
                       fontSize: 12,
                       fontWeight: FontWeight.w600,
@@ -272,6 +302,16 @@ class _ApplicationCard extends StatelessWidget {
               'Posted by ${job.postedBy} \u2022 ${job.location}',
               style: TextStyle(fontSize: 14, color: HabiColors.cream),
             ),
+            if (isHistorical) ...[
+              SizedBox(height: 4),
+              Text(
+                'This listing is closed or no longer available.',
+                style: TextStyle(
+                  fontSize: 12,
+                  color: HabiColors.cream.withAlpha(170),
+                ),
+              ),
+            ],
             SizedBox(height: 2),
             Text(
               'Applied \u2022 ${_formatDate(application.appliedAt)}',
@@ -289,9 +329,85 @@ class _ApplicationCard extends StatelessWidget {
                 ],
               ),
             ],
+            if (applicationStatusLabel(application.status) ==
+                'Interview Scheduled')
+              _interviewPanel(context),
           ],
         ),
       ),
     );
   }
+
+  Widget _interviewPanel(BuildContext context) =>
+      StreamBuilder<List<HabiInterview>>(
+        stream: InterviewStore.instance.watchForApplication(
+          '${application.jobId}_${application.applicantId}',
+          asEmployer: false,
+        ),
+        builder: (context, snapshot) {
+          final interviews = snapshot.data;
+          if (interviews == null || interviews.isEmpty) {
+            return const SizedBox.shrink();
+          }
+          final interview = interviews.first;
+          if (interview.status != 'scheduled') return const SizedBox.shrink();
+          final date = MaterialLocalizations.of(context)
+              .formatFullDate(interview.startsAt);
+          final time = MaterialLocalizations.of(context)
+              .formatTimeOfDay(TimeOfDay.fromDateTime(interview.startsAt));
+          return Padding(
+            padding: const EdgeInsets.only(top: 14),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Interview: $date at $time • ${interview.format}',
+                  style: TextStyle(color: HabiColors.cream),
+                ),
+                if (interview.locationOrLink.isNotEmpty)
+                  SelectableText(
+                    interview.locationOrLink,
+                    style: TextStyle(color: HabiColors.gold),
+                  ),
+                if (interview.instructions.isNotEmpty)
+                  Text(
+                    interview.instructions,
+                    style: TextStyle(color: HabiColors.cream.withAlpha(190)),
+                  ),
+                Text(
+                  'Response: ${interview.applicantResponse}',
+                  style: TextStyle(color: HabiColors.cream.withAlpha(190)),
+                ),
+                if (interview.applicantResponse == 'pending')
+                  Wrap(
+                    spacing: 8,
+                    children: [
+                      TextButton(
+                        onPressed: () => InterviewStore.instance.respond(
+                          interview: interview,
+                          response: 'confirmed',
+                        ),
+                        child: const Text('Confirm'),
+                      ),
+                      TextButton(
+                        onPressed: () => InterviewStore.instance.respond(
+                          interview: interview,
+                          response: 'rescheduleRequested',
+                        ),
+                        child: const Text('Request reschedule'),
+                      ),
+                      TextButton(
+                        onPressed: () => InterviewStore.instance.respond(
+                          interview: interview,
+                          response: 'declined',
+                        ),
+                        child: const Text('Decline'),
+                      ),
+                    ],
+                  ),
+              ],
+            ),
+          );
+        },
+      );
 }

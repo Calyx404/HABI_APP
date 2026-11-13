@@ -7,6 +7,7 @@ import 'package:habi/shared/widgets/habi_nav_bar.dart';
 import 'package:habi/features/jobs/job_card.dart';
 import 'package:habi/data/job_store.dart';
 import 'package:habi/features/jobs/jobs_screen.dart';
+import 'package:habi/shared/widgets/habi_notification_button.dart';
 
 /// My Jobs: the jobs the person applied for or is taking.
 class MyJobsScreen extends StatelessWidget {
@@ -23,6 +24,7 @@ class MyJobsScreen extends StatelessWidget {
         foregroundColor: HabiColors.cream,
         elevation: 0,
         title: Text('My Jobs', style: TextStyle(fontWeight: FontWeight.w600)),
+        actions: [HabiNotificationButton(userName: userName)],
       ),
       body: Stack(
         fit: StackFit.expand,

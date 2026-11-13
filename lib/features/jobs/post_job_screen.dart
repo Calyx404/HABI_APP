@@ -3,7 +3,9 @@ import 'package:flutter/material.dart';
 import 'package:habi/shared/theme/habi_background.dart';
 
 import 'package:habi/shared/theme/habi_colors.dart';
+import 'package:habi/shared/widgets/habi_notification_button.dart';
 import 'package:habi/data/job_store.dart';
+import 'package:habi/data/employer_store.dart';
 
 const List<String> kExperienceOptions = [
   'No experience needed',
@@ -37,8 +39,11 @@ class _PostJobScreenState extends State<PostJobScreen> {
   String _setup = 'On-site';
   String _type = 'Full Time';
   String _experience = kExperienceOptions.first;
+  bool _isSaving = false;
 
   bool get _isEditing => widget.job != null;
+  bool get _canManageJobs =>
+      EmployerStore.instance.current?.verificationStatus != 'suspended';
 
   @override
   void initState() {
@@ -72,8 +77,12 @@ class _PostJobScreenState extends State<PostJobScreen> {
     super.dispose();
   }
 
-  void _submit() {
+  Future<void> _submit({required bool asDraft}) async {
     if (!_formKey.currentState!.validate()) return;
+    if (_isSaving) return;
+    setState(() {
+      _isSaving = true;
+    });
     final location = _location.text.trim();
     final job = Job(
       id: widget.job?.id,
@@ -88,13 +97,33 @@ class _PostJobScreenState extends State<PostJobScreen> {
       workSchedule: _schedule.text.trim(),
       accessibility: _accessibility.text.trim(),
       requirements: _requirements.text.trim(),
+      isDraft: asDraft,
     );
-    if (_isEditing) {
-      JobStore.instance.update(job);
-    } else {
-      JobStore.instance.add(job);
+    try {
+      if (_isEditing) {
+        await JobStore.instance.update(job);
+      } else {
+        await JobStore.instance.add(job);
+      }
+      if (mounted) Navigator.of(context).pop(true);
+    } catch (error) {
+      if (!mounted) return;
+      final suspended =
+          EmployerStore.instance.current?.verificationStatus == 'suspended';
+      ScaffoldMessenger.of(context)
+        ..hideCurrentSnackBar()
+        ..showSnackBar(
+          SnackBar(
+            content: Text(
+              suspended
+                  ? 'This employer account is suspended and cannot post or edit jobs.'
+                  : 'Could not save this job. Check your connection and try again.',
+            ),
+          ),
+        );
+    } finally {
+      if (mounted) setState(() => _isSaving = false);
     }
-    Navigator.of(context).pop(true);
   }
 
   InputDecoration _dec(String label, {String? hint}) {
@@ -125,15 +154,19 @@ class _PostJobScreenState extends State<PostJobScreen> {
     required List<String> items,
     required ValueChanged<String> onChanged,
   }) {
+    final uniqueItems = items.toSet().toList(growable: false);
+    final initialValue = uniqueItems.where((item) => item == value).length == 1
+        ? value
+        : null;
     return DropdownButtonFormField<String>(
-      initialValue: value,
+      initialValue: initialValue,
       isExpanded: true,
       dropdownColor: HabiColors.navyMid,
       iconEnabledColor: HabiColors.cream,
       style: TextStyle(color: HabiColors.cream, fontSize: 16),
       decoration: _dec(label),
       items: [
-        for (final item in items)
+        for (final item in uniqueItems)
           DropdownMenuItem(value: item, child: Text(item)),
       ],
       onChanged: (v) {
@@ -178,6 +211,7 @@ class _PostJobScreenState extends State<PostJobScreen> {
           _isEditing ? 'Edit Job' : 'Post a Job',
           style: TextStyle(fontWeight: FontWeight.w600),
         ),
+        actions: [HabiNotificationButton(userName: widget.userName)],
       ),
       body: Stack(
         fit: StackFit.expand,
@@ -200,6 +234,22 @@ class _PostJobScreenState extends State<PostJobScreen> {
                         color: HabiColors.cream.withAlpha(210),
                       ),
                     ),
+                    if (EmployerStore.instance.current?.verificationStatus ==
+                        'suspended') ...[
+                      const SizedBox(height: 12),
+                      const Text(
+                        'This employer account is suspended and cannot manage job listings.',
+                      ),
+                    ] else if (EmployerStore
+                            .instance
+                            .current
+                            ?.verificationStatus !=
+                        'verified') ...[
+                      const SizedBox(height: 12),
+                      const Text(
+                        'Supporting documents and employer verification are optional. You can publish this job now without uploading documents.',
+                      ),
+                    ],
                     SizedBox(height: 20),
                     _text(
                       controller: _title,
@@ -305,7 +355,9 @@ class _PostJobScreenState extends State<PostJobScreen> {
                     SizedBox(
                       height: 52,
                       child: FilledButton(
-                        onPressed: _submit,
+                        onPressed: _isSaving || !_canManageJobs
+                            ? null
+                            : () => _submit(asDraft: false),
                         style: FilledButton.styleFrom(
                           backgroundColor: Color(0xFFE2BB6C),
                           foregroundColor: HabiColors.ink,
@@ -317,8 +369,22 @@ class _PostJobScreenState extends State<PostJobScreen> {
                             fontWeight: FontWeight.w600,
                           ),
                         ),
-                        child: Text(_isEditing ? 'Save Changes' : 'Post Job'),
+                        child: _isSaving
+                            ? const SizedBox.square(
+                                dimension: 20,
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2,
+                                ),
+                              )
+                            : Text(_isEditing ? 'Publish Job' : 'Post Job'),
                       ),
+                    ),
+                    const SizedBox(height: 10),
+                    OutlinedButton(
+                      onPressed: _isSaving || !_canManageJobs
+                          ? null
+                          : () => _submit(asDraft: true),
+                      child: Text(_isEditing ? 'Save as Draft' : 'Save Draft'),
                     ),
                   ],
                 ),

@@ -3,8 +3,20 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/foundation.dart';
 
 import 'package:habi/backend/auth_service.dart';
-import 'package:habi/backend/storage_service.dart';
 import 'package:habi/backend/firebase_services.dart';
+
+enum EmployerVerificationStatus {
+  pending,
+  underReview,
+  verified,
+  rejected,
+  suspended,
+}
+
+String employerVerificationStatus(Object? value) =>
+    EmployerVerificationStatus.values.any((status) => status.name == value)
+    ? value! as String
+    : EmployerVerificationStatus.pending.name;
 
 class EmployerAccount {
   EmployerAccount({
@@ -24,9 +36,12 @@ class EmployerAccount {
     this.businessRegistrationNumber = '',
     this.supportingDocumentName = '',
     this.supportingDocumentStoragePath = '',
-    this.supportingDocumentBytes,
+    this.supportingDocumentFileId = '',
     this.employerWebsite = '',
     this.verificationEmail = '',
+    this.verificationStatus = 'pending',
+    this.verificationReason = '',
+    this.verificationUpdatedAt,
     this.profileComplete = false,
   });
 
@@ -46,36 +61,44 @@ class EmployerAccount {
   String? businessRegistrationNumber;
   String? supportingDocumentName;
   String? supportingDocumentStoragePath;
-  final Uint8List? supportingDocumentBytes;
+  String supportingDocumentFileId;
   final String? employerWebsite;
   final String? verificationEmail;
+  final String verificationStatus;
+  final String verificationReason;
+  final DateTime? verificationUpdatedAt;
   final bool? profileComplete;
 
-  factory EmployerAccount.fromFirestore(Map<String, dynamic> data) =>
-      EmployerAccount(
-        uid: data['uid'] as String? ?? '',
-        companyName: data['companyName'] as String? ?? '',
-        organizationType: data['organizationType'] as String? ?? '',
-        industry: data['industry'] as String? ?? '',
-        email: data['email'] as String? ?? '',
-        contactFirstName: data['contactFirstName'] as String? ?? '',
-        contactLastName: data['contactLastName'] as String? ?? '',
-        position: data['position'] as String? ?? '',
-        phone: data['phone'] as String? ?? '',
-        address: data['address'] as String? ?? '',
-        city: data['city'] as String? ?? '',
-        description: data['description'] as String? ?? '',
-        businessRegistrationType:
-            data['businessRegistrationType'] as String? ?? '',
-        businessRegistrationNumber:
-            data['businessRegistrationNumber'] as String? ?? '',
-        supportingDocumentName: data['supportingDocumentName'] as String? ?? '',
-        supportingDocumentStoragePath:
-            data['supportingDocumentStoragePath'] as String? ?? '',
-        employerWebsite: data['employerWebsite'] as String? ?? '',
-        verificationEmail: data['verificationEmail'] as String? ?? '',
-        profileComplete: data['profileComplete'] as bool? ?? false,
-      );
+  factory EmployerAccount.fromFirestore(
+    Map<String, dynamic> data,
+  ) => EmployerAccount(
+    uid: data['uid'] as String? ?? '',
+    companyName: data['companyName'] as String? ?? '',
+    organizationType: data['organizationType'] as String? ?? '',
+    industry: data['industry'] as String? ?? '',
+    email: data['email'] as String? ?? '',
+    contactFirstName: data['contactFirstName'] as String? ?? '',
+    contactLastName: data['contactLastName'] as String? ?? '',
+    position: data['position'] as String? ?? '',
+    phone: data['phone'] as String? ?? '',
+    address: data['address'] as String? ?? '',
+    city: data['city'] as String? ?? '',
+    description: data['description'] as String? ?? '',
+    businessRegistrationType: data['businessRegistrationType'] as String? ?? '',
+    businessRegistrationNumber:
+        data['businessRegistrationNumber'] as String? ?? '',
+    supportingDocumentName: data['supportingDocumentName'] as String? ?? '',
+    supportingDocumentStoragePath:
+        data['supportingDocumentStoragePath'] as String? ?? '',
+    supportingDocumentFileId: data['supportingDocumentFileId'] as String? ?? '',
+    employerWebsite: data['employerWebsite'] as String? ?? '',
+    verificationEmail: data['verificationEmail'] as String? ?? '',
+    verificationStatus: employerVerificationStatus(data['verificationStatus']),
+    verificationReason: data['verificationReason'] as String? ?? '',
+    verificationUpdatedAt: (data['verificationUpdatedAt'] as Timestamp?)
+        ?.toDate(),
+    profileComplete: data['profileComplete'] as bool? ?? false,
+  );
 
   Map<String, Object?> toFirestore() => {
     'uid': uid,
@@ -94,8 +117,13 @@ class EmployerAccount {
     'businessRegistrationNumber': businessRegistrationNumber,
     'supportingDocumentName': supportingDocumentName,
     'supportingDocumentStoragePath': supportingDocumentStoragePath,
+    'supportingDocumentFileId': supportingDocumentFileId,
     'employerWebsite': employerWebsite,
     'verificationEmail': verificationEmail,
+    'verificationStatus': verificationStatus,
+    if (verificationReason.isNotEmpty) 'verificationReason': verificationReason,
+    if (verificationUpdatedAt != null)
+      'verificationUpdatedAt': Timestamp.fromDate(verificationUpdatedAt!),
     'profileComplete': profileComplete ?? false,
   };
 
@@ -104,9 +132,12 @@ class EmployerAccount {
     String? businessRegistrationNumber,
     String? supportingDocumentName,
     String? supportingDocumentStoragePath,
-    Uint8List? supportingDocumentBytes,
+    String? supportingDocumentFileId,
     String? employerWebsite,
     String? verificationEmail,
+    String? verificationStatus,
+    String? verificationReason,
+    DateTime? verificationUpdatedAt,
     bool? profileComplete,
   }) => EmployerAccount(
     uid: uid,
@@ -129,9 +160,13 @@ class EmployerAccount {
         supportingDocumentName ?? this.supportingDocumentName,
     supportingDocumentStoragePath:
         supportingDocumentStoragePath ?? this.supportingDocumentStoragePath,
-    supportingDocumentBytes: supportingDocumentBytes,
+    supportingDocumentFileId:
+        supportingDocumentFileId ?? this.supportingDocumentFileId,
     employerWebsite: employerWebsite ?? this.employerWebsite,
     verificationEmail: verificationEmail ?? this.verificationEmail,
+    verificationStatus: verificationStatus ?? this.verificationStatus,
+    verificationReason: verificationReason ?? this.verificationReason,
+    verificationUpdatedAt: verificationUpdatedAt ?? this.verificationUpdatedAt,
     profileComplete: profileComplete ?? this.profileComplete,
   );
 }
@@ -169,15 +204,26 @@ class EmployerStore extends ChangeNotifier {
       ..phone = phone.trim()
       ..address = address.trim()
       ..city = city.trim();
-    await HabiFirebaseServices.instance.firestore
-        .collection('employer_profiles')
-        .doc(account.uid)
-        .set(account.toFirestore(), SetOptions(merge: true));
-    await HabiAuthService.instance.saveUser(account.uid, {
-      'displayName': account.companyName,
-      'companyName': account.companyName,
-      'phone': account.phone,
-    });
+    await HabiAuthService.instance.saveEmployerProfileAndUser(
+      uid: account.uid,
+      employerProfile: {
+        'companyName': account.companyName,
+        'organizationType': account.organizationType,
+        'industry': account.industry,
+        'contactFirstName': account.contactFirstName,
+        'contactLastName': account.contactLastName,
+        'position': account.position,
+        'phone': account.phone,
+        'address': account.address,
+        'city': account.city,
+        'description': account.description,
+      },
+      userProfile: {
+        'displayName': account.companyName,
+        'companyName': account.companyName,
+        'phone': account.phone,
+      },
+    );
     await HabiAuthService.instance.currentUser?.updateDisplayName(
       account.companyName,
     );
@@ -189,38 +235,37 @@ class EmployerStore extends ChangeNotifier {
     required String businessRegistrationType,
     required String businessRegistrationNumber,
     required String supportingDocumentName,
-    required Uint8List? supportingDocumentBytes,
     required String employerWebsite,
     required String verificationEmail,
     required bool profileComplete,
   }) async {
     final account = byCompanyName(companyName);
     if (account == null) return;
-    var storagePath = account.supportingDocumentStoragePath ?? '';
-    if (supportingDocumentBytes != null) {
-      storagePath = await HabiStorageService.instance.uploadBytes(
-        path: 'employer_documents/${account.uid}/business_registration',
-        bytes: supportingDocumentBytes,
-        contentType: _documentContentType(supportingDocumentName),
-      );
-    }
     final updated = account.copyWith(
       businessRegistrationType: businessRegistrationType,
       businessRegistrationNumber: businessRegistrationNumber,
       supportingDocumentName: supportingDocumentName,
-      supportingDocumentStoragePath: storagePath,
       employerWebsite: employerWebsite,
       verificationEmail: verificationEmail,
       profileComplete: profileComplete,
     );
-    await HabiFirebaseServices.instance.firestore
-        .collection('employer_profiles')
-        .doc(account.uid)
-        .set(updated.toFirestore(), SetOptions(merge: true));
-    await HabiAuthService.instance.saveUser(account.uid, {
-      'profileComplete': profileComplete,
-      'displayName': account.companyName,
-    });
+    await HabiAuthService.instance.saveEmployerProfileAndUser(
+      uid: account.uid,
+      employerProfile: {
+        'businessRegistrationType': updated.businessRegistrationType,
+        'businessRegistrationNumber': updated.businessRegistrationNumber,
+        'supportingDocumentName': updated.supportingDocumentName,
+        'supportingDocumentStoragePath': updated.supportingDocumentStoragePath,
+        'supportingDocumentFileId': updated.supportingDocumentFileId,
+        'employerWebsite': updated.employerWebsite,
+        'verificationEmail': updated.verificationEmail,
+        'profileComplete': updated.profileComplete,
+      },
+      userProfile: {
+        'profileComplete': profileComplete,
+        'displayName': account.companyName,
+      },
+    );
     _current = updated;
     notifyListeners();
   }
@@ -273,14 +318,4 @@ class EmployerStore extends ChangeNotifier {
     _current = null;
     notifyListeners();
   }
-}
-
-String _documentContentType(String name) {
-  final extension = name.split('.').last.toLowerCase();
-  return switch (extension) {
-    'pdf' => 'application/pdf',
-    'png' => 'image/png',
-    'jpg' || 'jpeg' => 'image/jpeg',
-    _ => 'application/octet-stream',
-  };
 }

@@ -1,6 +1,7 @@
 import 'package:flutter/foundation.dart';
 import 'package:habi/data/account_store.dart';
 import 'package:habi/data/repositories/user_settings_repository.dart';
+import 'package:habi/backend/push_notification_service.dart';
 
 class SettingsViewModel extends ChangeNotifier {
   SettingsViewModel({
@@ -17,6 +18,7 @@ class SettingsViewModel extends ChangeNotifier {
     'applicationUpdates': true,
     'messages': true,
     'trainingReminders': false,
+    'pushEnabled': false,
     'darkMode': true,
   };
   bool _isLoading = false;
@@ -49,6 +51,36 @@ class SettingsViewModel extends ChangeNotifier {
 
   Future<bool> setValue(String key, bool value) async {
     if (!_values.containsKey(key) || _values[key] is! bool) return false;
+    if (key == 'pushEnabled' && value) {
+      if (kIsWeb ||
+          !const {
+            TargetPlatform.android,
+            TargetPlatform.iOS,
+            TargetPlatform.macOS,
+          }.contains(defaultTargetPlatform)) {
+        _error = 'Push notifications are not configured for this platform yet.';
+        notifyListeners();
+        return false;
+      }
+      try {
+        final enabled = await PushNotificationService.instance.enable();
+        if (!enabled) {
+          _error =
+              'Allow notifications in device settings to enable push alerts.';
+          notifyListeners();
+          return false;
+        }
+      } catch (error) {
+        _error = error.toString();
+        notifyListeners();
+        return false;
+      }
+    }
+    if (key == 'pushEnabled' && !value) {
+      final saved = await _persistValue(key, false);
+      if (saved) await PushNotificationService.instance.disable();
+      return saved;
+    }
     return _persistValue(key, value);
   }
 

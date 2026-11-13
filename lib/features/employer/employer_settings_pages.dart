@@ -1,13 +1,12 @@
-import 'dart:typed_data';
-
-import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 
 import 'package:habi/shared/theme/habi_colors.dart';
+import 'package:habi/shared/theme/habi_background.dart';
 import 'package:habi/data/employer_store.dart';
 import 'package:habi/backend/auth_service.dart';
 import 'package:habi/features/settings/settings_view_model.dart';
 import 'package:habi/features/support/support_screen.dart';
+import 'package:habi/shared/widgets/habi_notification_button.dart';
 
 /// Shared shell for employer account and preference pages.
 class EmployerSettingsScaffold extends StatelessWidget {
@@ -30,6 +29,9 @@ class EmployerSettingsScaffold extends StatelessWidget {
       foregroundColor: HabiColors.cream,
       title: Text(title, style: TextStyle(fontWeight: FontWeight.w700)),
       actions: [
+        HabiNotificationButton(
+          userName: EmployerStore.instance.current?.companyName ?? '',
+        ),
         Padding(
           padding: const EdgeInsets.only(right: 16),
           child: Image.asset('assets/habi_logo.png', width: 34, height: 34),
@@ -39,8 +41,7 @@ class EmployerSettingsScaffold extends StatelessWidget {
     body: Stack(
       fit: StackFit.expand,
       children: [
-        Image.asset('assets/habi_bg.jpg', fit: BoxFit.cover),
-        Container(color: HabiColors.navy.withAlpha(225)),
+        const HabiBackground(),
         SafeArea(
           child: SingleChildScrollView(
             padding: const EdgeInsets.fromLTRB(20, 18, 20, 28),
@@ -126,17 +127,24 @@ class _EmployerPageBits {
     String value,
     List<String> options,
     ValueChanged<String?> onChanged,
-  ) => DropdownButtonFormField<String>(
-    initialValue: value,
-    dropdownColor: HabiColors.navyMid,
-    iconEnabledColor: HabiColors.gold,
-    style: TextStyle(color: HabiColors.cream, fontSize: 16),
-    decoration: input(value),
-    items: options
-        .map((item) => DropdownMenuItem(value: item, child: Text(item)))
-        .toList(),
-    onChanged: onChanged,
-  );
+  ) {
+    final uniqueOptions = options.toSet().toList(growable: false);
+    final initialValue =
+        uniqueOptions.where((option) => option == value).length == 1
+        ? value
+        : null;
+    return DropdownButtonFormField<String>(
+      initialValue: initialValue,
+      dropdownColor: HabiColors.navyMid,
+      iconEnabledColor: HabiColors.gold,
+      style: TextStyle(color: HabiColors.cream, fontSize: 16),
+      decoration: input('Select an option'),
+      items: uniqueOptions
+          .map((item) => DropdownMenuItem(value: item, child: Text(item)))
+          .toList(),
+      onChanged: onChanged,
+    );
+  }
 
   static Widget saveButton(String label, VoidCallback onPressed) => SizedBox(
     height: 54,
@@ -277,12 +285,9 @@ class _EmployerAccountSettingsScreenState
       if (!mounted) return;
       _EmployerPageBits.saved(context, 'Account details saved.');
       Navigator.of(context).pop();
-    } catch (_) {
+    } catch (error) {
       if (mounted) {
-        _EmployerPageBits.saved(
-          context,
-          'Could not save account details. Check your connection and try again.',
-        );
+        _EmployerPageBits.saved(context, firebaseProfileErrorMessage(error));
       }
     }
   }
@@ -455,7 +460,6 @@ class _EmployerProfileEditScreenState extends State<EmployerProfileEditScreen> {
   String _registrationType =
       EmployerStore.instance.current?.businessRegistrationType ??
       'Business Registration Type';
-  Uint8List? _documentBytes;
 
   @override
   void dispose() {
@@ -468,32 +472,6 @@ class _EmployerProfileEditScreenState extends State<EmployerProfileEditScreen> {
   }
 
   Widget _gap() => const SizedBox(height: 14);
-
-  Future<void> _chooseDocument() async {
-    try {
-      final files = await FilePicker.pickFiles(
-        type: FileType.custom,
-        allowedExtensions: const ['pdf', 'png', 'jpg', 'jpeg'],
-      );
-      if (files.isEmpty) return;
-      final file = files.first;
-      final bytes = await file.readAsBytes();
-      if (bytes.length > 10 * 1024 * 1024) {
-        if (mounted) {
-          _EmployerPageBits.saved(context, 'Choose a file under 10 MB.');
-        }
-        return;
-      }
-      setState(() {
-        _documentBytes = bytes;
-        _document.text = file.name;
-      });
-    } catch (_) {
-      if (mounted) {
-        _EmployerPageBits.saved(context, 'Could not open the file picker.');
-      }
-    }
-  }
 
   Future<void> _save() async {
     final account = _account;
@@ -509,7 +487,6 @@ class _EmployerProfileEditScreenState extends State<EmployerProfileEditScreen> {
             : _registrationType,
         businessRegistrationNumber: _registrationNumber.text.trim(),
         supportingDocumentName: _document.text.trim(),
-        supportingDocumentBytes: _documentBytes,
         employerWebsite: _website.text.trim(),
         verificationEmail: _verificationEmail.text.trim(),
         profileComplete: true,
@@ -519,15 +496,7 @@ class _EmployerProfileEditScreenState extends State<EmployerProfileEditScreen> {
       Navigator.of(context).pop();
     } catch (error) {
       if (mounted) {
-        final storageUnavailable =
-            error.toString().contains('bucket') ||
-            error.toString().contains('object-not-found');
-        _EmployerPageBits.saved(
-          context,
-          storageUnavailable
-              ? 'Profile details could not be saved with the document. Set up Firebase Storage and try again.'
-              : 'Could not save employer profile. Check your connection and try again.',
-        );
+        _EmployerPageBits.saved(context, firebaseProfileErrorMessage(error));
       }
     }
   }
@@ -571,15 +540,8 @@ class _EmployerProfileEditScreenState extends State<EmployerProfileEditScreen> {
           'Business Registration Number',
         ),
         _gap(),
-        OutlinedButton.icon(
-          onPressed: _chooseDocument,
-          icon: Icon(Icons.upload_file_outlined),
-          label: Text(
-            _document.text.isEmpty
-                ? 'Choose supporting document'
-                : _document.text,
-          ),
-          style: OutlinedButton.styleFrom(foregroundColor: HabiColors.gold),
+        const Text(
+          'Document attachments are temporarily unavailable. Business registration details and a verification contact can still be submitted.',
         ),
         const SizedBox(height: 6),
         Text(

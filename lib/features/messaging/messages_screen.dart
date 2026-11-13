@@ -3,17 +3,25 @@ import 'package:flutter/material.dart';
 import 'package:habi/shared/theme/habi_background.dart';
 
 import 'package:habi/features/messaging/chat_screen.dart';
-import 'package:habi/shared/theme/habi_colors.dart';
 import 'package:habi/shared/widgets/habi_nav_bar.dart';
 import 'package:habi/data/message_store.dart';
-import 'package:habi/data/notification_store.dart';
+import 'package:habi/data/notification_store.dart' show formatTimeAgo;
 import 'package:habi/features/messaging/messages_view_model.dart';
+import 'package:habi/shared/widgets/habi_notification_button.dart';
+import 'package:habi/shared/widgets/habi_components.dart';
 
 /// The Message tab: every chat between employers and applicants.
 class MessagesScreen extends StatefulWidget {
-  const MessagesScreen({super.key, required this.userName});
+  const MessagesScreen({
+    super.key,
+    required this.userName,
+    this.showBottomNavigation = true,
+    this.showBackButton = true,
+  });
 
   final String userName;
+  final bool showBottomNavigation;
+  final bool showBackButton;
 
   @override
   State<MessagesScreen> createState() => _MessagesScreenState();
@@ -21,6 +29,8 @@ class MessagesScreen extends StatefulWidget {
 
 class _MessagesScreenState extends State<MessagesScreen> {
   bool _showArchived = false;
+  bool _unreadOnly = false;
+  final _searchController = TextEditingController();
   late final MessagesViewModel _viewModel = MessagesViewModel(
     repository: MessageStore.instance,
     userName: widget.userName,
@@ -29,10 +39,12 @@ class _MessagesScreenState extends State<MessagesScreen> {
   @override
   void dispose() {
     _viewModel.dispose();
+    _searchController.dispose();
     super.dispose();
   }
 
   void _snack(String text, {SnackBarAction? action}) {
+    final scheme = Theme.of(context).colorScheme;
     ScaffoldMessenger.of(context)
       ..hideCurrentSnackBar()
       ..showSnackBar(
@@ -40,7 +52,7 @@ class _MessagesScreenState extends State<MessagesScreen> {
           content: Text(text),
           action: action,
           behavior: SnackBarBehavior.floating,
-          backgroundColor: HabiColors.navyLight,
+          backgroundColor: scheme.inverseSurface,
         ),
       );
   }
@@ -67,7 +79,7 @@ class _MessagesScreenState extends State<MessagesScreen> {
       'Conversation archived.',
       action: SnackBarAction(
         label: 'Undo',
-        textColor: HabiColors.gold,
+        textColor: Theme.of(context).colorScheme.primary,
         onPressed: () async {
           final restored = await _viewModel.unarchive(c.id);
           if (mounted && !restored) {
@@ -90,18 +102,19 @@ class _MessagesScreenState extends State<MessagesScreen> {
   }
 
   Future<void> _delete(Conversation c) async {
+    final scheme = Theme.of(context).colorScheme;
     final ok = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
-        backgroundColor: HabiColors.navyMid,
+        backgroundColor: scheme.surfaceContainerHigh,
         title: Text(
           'Delete this conversation?',
-          style: TextStyle(color: HabiColors.cream),
+          style: TextStyle(color: scheme.onSurface),
         ),
         content: Text(
           'It will be removed from your Messages. '
           '${c.otherPerson(widget.userName)} keeps their copy.',
-          style: TextStyle(color: HabiColors.cream.withAlpha(210)),
+          style: TextStyle(color: scheme.onSurfaceVariant),
         ),
         actions: [
           TextButton(
@@ -110,7 +123,7 @@ class _MessagesScreenState extends State<MessagesScreen> {
           ),
           TextButton(
             onPressed: () => Navigator.of(ctx).pop(true),
-            style: TextButton.styleFrom(foregroundColor: Color(0xFFE5766B)),
+            style: TextButton.styleFrom(foregroundColor: scheme.error),
             child: Text('Delete'),
           ),
         ],
@@ -139,22 +152,26 @@ class _MessagesScreenState extends State<MessagesScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
     return Scaffold(
-      backgroundColor: HabiColors.navy,
+      backgroundColor: scheme.surface,
       appBar: AppBar(
-        backgroundColor: HabiColors.navy,
-        foregroundColor: HabiColors.cream,
+        backgroundColor: scheme.surface,
+        foregroundColor: scheme.onSurface,
         elevation: 0,
-        leading: IconButton(
-          icon: Icon(Icons.arrow_back),
-          onPressed: () {
-            if (_showArchived) {
-              setState(() => _showArchived = false);
-            } else {
-              Navigator.of(context).maybePop();
-            }
-          },
-        ),
+        leading: _showArchived || widget.showBackButton
+            ? IconButton(
+                tooltip: _showArchived ? 'Back to messages' : 'Back',
+                icon: const Icon(Icons.arrow_back),
+                onPressed: () {
+                  if (_showArchived) {
+                    setState(() => _showArchived = false);
+                  } else {
+                    Navigator.of(context).maybePop();
+                  }
+                },
+              )
+            : const SizedBox.shrink(),
         title: Text(
           _showArchived ? 'Archived' : 'Messages',
           style: TextStyle(fontWeight: FontWeight.w600),
@@ -163,10 +180,10 @@ class _MessagesScreenState extends State<MessagesScreen> {
           if (!_showArchived)
             TextButton(
               onPressed: _markAllRead,
-              style: TextButton.styleFrom(foregroundColor: HabiColors.gold),
+              style: TextButton.styleFrom(foregroundColor: scheme.primary),
               child: Text('Mark all as read'),
             ),
-          SizedBox(width: 4),
+          HabiNotificationButton(userName: widget.userName),
         ],
       ),
       body: Stack(
@@ -177,14 +194,73 @@ class _MessagesScreenState extends State<MessagesScreen> {
             child: ListenableBuilder(
               listenable: _viewModel,
               builder: (context, _) {
-                final chats = _viewModel.conversations(archived: _showArchived);
+                final query = _searchController.text.trim().toLowerCase();
+                final chats = _viewModel
+                    .conversations(archived: _showArchived)
+                    .where(
+                      (c) => !_unreadOnly || c.unreadFor(widget.userName) > 0,
+                    )
+                    .where((c) {
+                      if (query.isEmpty) return true;
+                      final last = c.lastFor(widget.userName);
+                      return '${c.otherPerson(widget.userName)} ${c.jobTitle} ${last?.text ?? ''}'
+                          .toLowerCase()
+                          .contains(query);
+                    })
+                    .toList();
                 final archivedCount = _showArchived
                     ? 0
                     : _viewModel.archivedCount;
-                if (chats.isEmpty && archivedCount == 0) return _buildEmpty();
+                if (chats.isEmpty && archivedCount == 0) {
+                  if (query.isEmpty && !_unreadOnly) return _buildEmpty();
+                  return ListView(
+                    padding: const EdgeInsets.fromLTRB(20, 8, 20, 16),
+                    children: [
+                      HabiSearchBar(
+                        controller: _searchController,
+                        hint: 'Search conversations',
+                        onChanged: (_) => setState(() {}),
+                      ),
+                      const SizedBox(height: 8),
+                      Align(
+                        alignment: Alignment.centerLeft,
+                        child: HabiFilterChip(
+                          label: 'Unread',
+                          selected: _unreadOnly,
+                          onSelected: (value) =>
+                              setState(() => _unreadOnly = value),
+                        ),
+                      ),
+                      const SizedBox(height: 24),
+                      Text(
+                        query.isNotEmpty
+                            ? 'No conversations match that search.'
+                            : 'No unread conversations.',
+                        textAlign: TextAlign.center,
+                        style: Theme.of(context).textTheme.bodyMedium,
+                      ),
+                    ],
+                  );
+                }
                 return ListView(
                   padding: EdgeInsets.fromLTRB(20, 8, 20, 16),
                   children: [
+                    HabiSearchBar(
+                      controller: _searchController,
+                      hint: 'Search conversations',
+                      onChanged: (_) => setState(() {}),
+                    ),
+                    const SizedBox(height: 8),
+                    Align(
+                      alignment: Alignment.centerLeft,
+                      child: HabiFilterChip(
+                        label: 'Unread',
+                        selected: _unreadOnly,
+                        onSelected: (value) =>
+                            setState(() => _unreadOnly = value),
+                      ),
+                    ),
+                    const SizedBox(height: 8),
                     if (archivedCount > 0)
                       _ArchivedRow(
                         count: archivedCount,
@@ -207,14 +283,14 @@ class _MessagesScreenState extends State<MessagesScreen> {
           ),
         ],
       ),
-      bottomNavigationBar: HabiNavBar(
-        userName: widget.userName,
-        active: NavTab.message,
-      ),
+      bottomNavigationBar: widget.showBottomNavigation
+          ? HabiNavBar(userName: widget.userName, active: NavTab.message)
+          : null,
     );
   }
 
   Widget _buildEmpty() {
+    final scheme = Theme.of(context).colorScheme;
     final title = _showArchived ? 'No archived chats' : 'No messages yet';
     final text = _showArchived
         ? 'Chats you archive will show up here.'
@@ -230,7 +306,7 @@ class _MessagesScreenState extends State<MessagesScreen> {
               _showArchived
                   ? Icons.archive_outlined
                   : Icons.chat_bubble_outline,
-              color: HabiColors.gold,
+              color: scheme.primary,
               size: 44,
             ),
             SizedBox(height: 12),
@@ -239,17 +315,14 @@ class _MessagesScreenState extends State<MessagesScreen> {
               style: TextStyle(
                 fontSize: 18,
                 fontWeight: FontWeight.w600,
-                color: HabiColors.cream,
+                color: scheme.onSurface,
               ),
             ),
             SizedBox(height: 6),
             Text(
               text,
               textAlign: TextAlign.center,
-              style: TextStyle(
-                fontSize: 14,
-                color: HabiColors.cream.withAlpha(200),
-              ),
+              style: TextStyle(fontSize: 14, color: scheme.onSurfaceVariant),
             ),
           ],
         ),
@@ -266,6 +339,7 @@ class _ArchivedRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
     return GestureDetector(
       onTap: onTap,
       child: Container(
@@ -273,13 +347,13 @@ class _ArchivedRow extends StatelessWidget {
         margin: EdgeInsets.only(bottom: 10),
         padding: EdgeInsets.symmetric(horizontal: 16, vertical: 14),
         decoration: BoxDecoration(
-          color: HabiColors.navy.withAlpha(200),
+          color: scheme.surfaceContainerLow,
           borderRadius: BorderRadius.circular(16),
-          border: Border.all(color: HabiColors.cream.withAlpha(60)),
+          border: Border.all(color: scheme.outlineVariant),
         ),
         child: Row(
           children: [
-            Icon(Icons.archive_outlined, color: HabiColors.gold),
+            Icon(Icons.archive_outlined, color: scheme.primary),
             SizedBox(width: 14),
             Expanded(
               child: Text(
@@ -287,16 +361,16 @@ class _ArchivedRow extends StatelessWidget {
                 style: TextStyle(
                   fontSize: 15,
                   fontWeight: FontWeight.w600,
-                  color: HabiColors.cream,
+                  color: scheme.onSurface,
                 ),
               ),
             ),
             Text(
               '$count',
-              style: TextStyle(fontSize: 14, color: HabiColors.cream),
+              style: TextStyle(fontSize: 14, color: scheme.onSurface),
             ),
             SizedBox(width: 6),
-            Icon(Icons.chevron_right, color: HabiColors.cream),
+            Icon(Icons.chevron_right, color: scheme.onSurfaceVariant),
           ],
         ),
       ),
@@ -326,7 +400,8 @@ class _ChatTile extends StatelessWidget {
     final other = conversation.otherPerson(userName);
     final last = conversation.lastFor(userName)!;
     final unread = conversation.unreadFor(userName);
-    final fromMe = last.from == userName;
+    final fromMe = last.senderId == MessageStore.instance.currentUserId;
+    final scheme = Theme.of(context).colorScheme;
 
     return GestureDetector(
       onTap: onTap,
@@ -335,25 +410,25 @@ class _ChatTile extends StatelessWidget {
         margin: EdgeInsets.only(bottom: 10),
         padding: EdgeInsets.fromLTRB(14, 12, 4, 12),
         decoration: BoxDecoration(
-          color: HabiColors.navy.withAlpha(200),
+          color: scheme.surfaceContainerLow,
           borderRadius: BorderRadius.circular(16),
           border: Border.all(
             color: unread > 0
-                ? HabiColors.gold.withAlpha(160)
-                : HabiColors.cream.withAlpha(60),
+                ? scheme.primary.withAlpha(170)
+                : scheme.outlineVariant,
           ),
         ),
         child: Row(
           children: [
             CircleAvatar(
               radius: 24,
-              backgroundColor: HabiColors.gold,
+              backgroundColor: scheme.primaryContainer,
               child: Text(
                 other.isEmpty ? '?' : other[0].toUpperCase(),
                 style: TextStyle(
                   fontSize: 20,
                   fontWeight: FontWeight.w700,
-                  color: HabiColors.ink,
+                  color: scheme.onPrimaryContainer,
                 ),
               ),
             ),
@@ -372,7 +447,7 @@ class _ChatTile extends StatelessWidget {
                           style: TextStyle(
                             fontSize: 16,
                             fontWeight: FontWeight.w600,
-                            color: HabiColors.cream,
+                            color: scheme.onSurface,
                           ),
                         ),
                       ),
@@ -380,7 +455,7 @@ class _ChatTile extends StatelessWidget {
                         formatTimeAgo(last.time),
                         style: TextStyle(
                           fontSize: 12,
-                          color: HabiColors.cream.withAlpha(160),
+                          color: scheme.onSurfaceVariant,
                         ),
                       ),
                     ],
@@ -390,7 +465,7 @@ class _ChatTile extends StatelessWidget {
                     conversation.jobTitle,
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
-                    style: TextStyle(fontSize: 12, color: HabiColors.gold),
+                    style: TextStyle(fontSize: 12, color: scheme.primary),
                   ),
                   SizedBox(height: 4),
                   Row(
@@ -406,8 +481,8 @@ class _ChatTile extends StatelessWidget {
                                 ? FontWeight.w600
                                 : FontWeight.w400,
                             color: unread > 0
-                                ? HabiColors.cream
-                                : HabiColors.cream.withAlpha(200),
+                                ? scheme.onSurface
+                                : scheme.onSurfaceVariant,
                           ),
                         ),
                       ),
@@ -419,7 +494,7 @@ class _ChatTile extends StatelessWidget {
                             vertical: 2,
                           ),
                           decoration: BoxDecoration(
-                            color: HabiColors.gold,
+                            color: scheme.primary,
                             borderRadius: BorderRadius.circular(10),
                           ),
                           child: Text(
@@ -427,7 +502,7 @@ class _ChatTile extends StatelessWidget {
                             style: TextStyle(
                               fontSize: 12,
                               fontWeight: FontWeight.w700,
-                              color: HabiColors.ink,
+                              color: scheme.onPrimary,
                             ),
                           ),
                         ),
@@ -437,8 +512,8 @@ class _ChatTile extends StatelessWidget {
               ),
             ),
             PopupMenuButton<String>(
-              icon: Icon(Icons.more_vert, color: HabiColors.cream),
-              color: HabiColors.navyMid,
+              icon: Icon(Icons.more_vert, color: scheme.onSurfaceVariant),
+              color: scheme.surfaceContainerHighest,
               onSelected: (value) {
                 if (value == 'archive') {
                   onArchive();
@@ -451,15 +526,12 @@ class _ChatTile extends StatelessWidget {
                   value: 'archive',
                   child: Text(
                     archived ? 'Unarchive' : 'Archive',
-                    style: TextStyle(color: HabiColors.cream),
+                    style: TextStyle(color: scheme.onSurface),
                   ),
                 ),
                 PopupMenuItem(
                   value: 'delete',
-                  child: Text(
-                    'Delete',
-                    style: TextStyle(color: Color(0xFFE5766B)),
-                  ),
+                  child: Text('Delete', style: TextStyle(color: scheme.error)),
                 ),
               ],
             ),

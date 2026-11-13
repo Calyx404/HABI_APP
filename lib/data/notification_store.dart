@@ -5,7 +5,7 @@ import 'package:flutter/foundation.dart';
 
 import 'package:habi/backend/firebase_services.dart';
 
-enum NotificationKind { application, status, message }
+enum NotificationKind { application, status, message, interview, verification }
 
 String formatTimeAgo(DateTime time) {
   final diff = DateTime.now().difference(time);
@@ -23,6 +23,9 @@ class AppNotification {
     required this.body,
     required this.kind,
     this.jobId,
+    this.applicationId,
+    this.applicationStatus,
+    this.applicantId,
     this.otherUser,
     this.otherUserId,
     this.conversationId,
@@ -36,6 +39,9 @@ class AppNotification {
   final String body;
   final NotificationKind kind;
   final String? jobId;
+  final String? applicationId;
+  final String? applicationStatus;
+  final String? applicantId;
   final String? otherUser;
   final String? otherUserId;
   final String? conversationId;
@@ -56,6 +62,9 @@ class AppNotification {
       orElse: () => NotificationKind.status,
     ),
     jobId: data['jobId'] as String?,
+    applicationId: data['applicationId'] as String?,
+    applicationStatus: data['applicationStatus'] as String?,
+    applicantId: data['applicantId'] as String?,
     otherUser: data['otherUserName'] as String?,
     otherUserId: data['otherUserId'] as String?,
     conversationId: data['conversationId'] as String?,
@@ -71,11 +80,15 @@ class NotificationStore extends ChangeNotifier {
   String _uid = '';
   final List<AppNotification> _items = [];
   StreamSubscription<QuerySnapshot<Map<String, dynamic>>>? _subscription;
+  String? _loadError;
+
+  String? get loadError => _loadError;
 
   void bindUser(String uid) {
     if (_uid == uid && _subscription != null) return;
     unawaited(_subscription?.cancel());
     _uid = uid;
+    _loadError = null;
     _items.clear();
     notifyListeners();
     if (uid.isEmpty) return;
@@ -86,16 +99,32 @@ class NotificationStore extends ChangeNotifier {
         .orderBy('createdAt', descending: true)
         .limit(100)
         .snapshots()
-        .listen((snapshot) {
-          _items
-            ..clear()
-            ..addAll(
-              snapshot.docs.map(
-                (doc) => AppNotification.fromFirestore(doc.id, doc.data(), uid),
-              ),
-            );
-          notifyListeners();
-        });
+        .listen(
+          (snapshot) {
+            _items
+              ..clear()
+              ..addAll(
+                snapshot.docs.map(
+                  (doc) =>
+                      AppNotification.fromFirestore(doc.id, doc.data(), uid),
+                ),
+              );
+            _loadError = null;
+            notifyListeners();
+          },
+          onError: (Object _) {
+            _loadError = 'Notifications could not be refreshed. Check your connection and retry.';
+            notifyListeners();
+          },
+        );
+  }
+
+  void retryLoad() {
+    final uid = _uid;
+    if (uid.isEmpty) return;
+    unawaited(_subscription?.cancel());
+    _subscription = null;
+    bindUser(uid);
   }
 
   List<AppNotification> listFor(String _) => List.unmodifiable(_items);
@@ -132,6 +161,7 @@ class NotificationStore extends ChangeNotifier {
     await _subscription?.cancel();
     _subscription = null;
     _uid = '';
+    _loadError = null;
     _items.clear();
     notifyListeners();
   }

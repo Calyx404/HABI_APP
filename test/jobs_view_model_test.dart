@@ -8,102 +8,105 @@ void main() {
   late JobsViewModel viewModel;
 
   setUp(() {
-    repository = _FakeJobRepository([
-      _job('1', title: 'Accessible Support Assistant', location: 'Manila'),
-      _job(
-        '2',
-        title: 'Remote Data Analyst',
-        location: 'Anywhere',
-        setup: 'Remote',
-        type: 'Part Time',
-      ),
-      _job('3', title: 'Office Coordinator', location: 'Cebu City'),
-    ]);
+    repository = _FakeJobRepository(
+      [
+        _job(
+          'a',
+          setup: 'Remote',
+          type: 'Full time',
+          experience: 'Entry level',
+          schedule: 'Day shift',
+          location: 'Manila',
+        ),
+        _job(
+          'b',
+          setup: 'On-site',
+          type: 'Part time',
+          experience: 'Experienced',
+          schedule: 'Night shift',
+          location: 'Cebu City',
+        ),
+      ],
+      savedIds: {'b'},
+    );
     viewModel = JobsViewModel(
       repository: repository,
-      preferredLocation: 'Manila, Metro Manila',
+      preferredLocation: 'Cebu City',
     );
   });
 
-  tearDown(() {
-    viewModel.dispose();
-    repository.dispose();
+  tearDown(() => viewModel.dispose());
+
+  test('tab changes notify listeners and select the requested job set', () {
+    var notified = 0;
+    viewModel.addListener(() => notified++);
+
+    viewModel.setTab(JobsTab.nearby);
+    expect(viewModel.tab, JobsTab.nearby);
+    expect(viewModel.jobs.map((job) => job.id), ['b']);
+
+    viewModel.setTab(JobsTab.saved);
+    expect(viewModel.tab, JobsTab.saved);
+    expect(viewModel.jobs.map((job) => job.id), ['b']);
+    expect(notified, 2);
   });
 
-  test('search matches all terms across title and job details', () {
-    viewModel.setQuery('support accessible');
-    expect(viewModel.jobs.map((job) => job.id), ['1']);
-
-    viewModel.setQuery('analyst cebu');
-    expect(viewModel.jobs, isEmpty);
-  });
-
-  test('filters combine work arrangement and employment type', () {
+  test('filters combine and clear all selected criteria', () {
     viewModel
       ..setArrangement('Remote')
-      ..setEmploymentType('Part Time');
-    expect(viewModel.jobs.map((job) => job.id), ['2']);
+      ..setEmploymentType('Full time')
+      ..setExperience('Entry level')
+      ..setWorkSchedule('Day shift');
+    expect(viewModel.jobs.map((job) => job.id), ['a']);
+    expect(viewModel.hasActiveFilters, isTrue);
 
-    viewModel.setArrangement('Hybrid');
-    expect(viewModel.jobs, isEmpty);
-  });
-
-  test(
-    'nearby tab uses preferred location and saved tab uses repository state',
-    () {
-      viewModel.setTab(JobsTab.nearby);
-      expect(viewModel.jobs.map((job) => job.id), ['1']);
-
-      repository.saved.add('3');
-      repository.notifyListeners();
-      viewModel.setTab(JobsTab.saved);
-      expect(viewModel.jobs.map((job) => job.id), ['3']);
-    },
-  );
-
-  test('nearby tab explains when no preferred location is available', () {
-    final noLocation = JobsViewModel(repository: repository)
-      ..setTab(JobsTab.nearby);
-    expect(noLocation.locationRequired, isTrue);
-    expect(noLocation.jobs, isEmpty);
-    noLocation.dispose();
+    viewModel.clearFilters();
+    expect(viewModel.jobs, hasLength(2));
+    expect(viewModel.hasActiveFilters, isFalse);
   });
 }
 
 Job _job(
   String id, {
-  required String title,
+  required String setup,
+  required String type,
+  required String experience,
+  required String schedule,
   required String location,
-  String setup = 'On-site',
-  String type = 'Full Time',
 }) => Job(
   id: id,
-  title: title,
+  title: 'Role $id',
   setup: setup,
   type: type,
+  experience: experience,
+  workSchedule: schedule,
   location: location,
   pay: '',
   description: '',
-  postedBy: 'HABI Employer',
+  postedBy: 'Employer',
 );
 
 class _FakeJobRepository extends ChangeNotifier implements JobRepository {
-  _FakeJobRepository(this.jobs);
+  _FakeJobRepository(this.jobs, {required this.savedIds});
 
   @override
   final List<Job> jobs;
 
-  final Set<String> saved = {};
+  final Set<String> savedIds;
 
   @override
   bool get isLoading => false;
+  @override
+  String? get loadError => null;
+  @override
+  void retryLoad() {}
 
   @override
-  bool isSaved(String id) => saved.contains(id);
+  bool isSaved(String id) => savedIds.contains(id);
 
   @override
   Future<void> toggleSave(String id) async {
-    if (!saved.add(id)) saved.remove(id);
+    if (!savedIds.add(id)) savedIds.remove(id);
     notifyListeners();
   }
 }

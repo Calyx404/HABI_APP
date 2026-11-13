@@ -5,7 +5,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/foundation.dart';
 
 import 'package:habi/backend/auth_service.dart';
-import 'package:habi/backend/storage_service.dart';
+import 'package:habi/backend/firestore_file_store.dart';
 
 /// The youngest age allowed to register.
 const int kMinimumAge = 18;
@@ -45,6 +45,7 @@ class Account {
     required this.cityProvince,
     required this.barangay,
     this.resumeStoragePath = '',
+    this.resumeFileId = '',
   });
 
   final String uid;
@@ -63,7 +64,9 @@ class Account {
 
   Set<String> beneficiaryCategories = {};
   bool shareBeneficiary = false;
+  String professionalSummary = '';
   String education = '';
+  Set<String> certifications = {};
   Set<String> skills = {};
   String workExperience = '';
   String employmentType = '';
@@ -77,6 +80,7 @@ class Account {
   bool visibility = true;
   String resumeName = '';
   String resumeStoragePath;
+  String resumeFileId;
   Uint8List? resumeFileBytes;
   bool profileDone = false;
 
@@ -105,10 +109,13 @@ class Account {
             cityProvince: data['cityProvince'] as String? ?? '',
             barangay: data['barangay'] as String? ?? '',
             resumeStoragePath: data['resumeStoragePath'] as String? ?? '',
+            resumeFileId: data['resumeFileId'] as String? ?? '',
           )
           ..beneficiaryCategories = _stringSet(data['beneficiaryCategories'])
           ..shareBeneficiary = data['shareBeneficiary'] as bool? ?? false
+          ..professionalSummary = data['professionalSummary'] as String? ?? ''
           ..education = data['education'] as String? ?? ''
+          ..certifications = _stringSet(data['certifications'])
           ..skills = _stringSet(data['skills'])
           ..workExperience = data['workExperience'] as String? ?? ''
           ..employmentType = data['employmentType'] as String? ?? ''
@@ -140,7 +147,9 @@ class Account {
     'barangay': barangay,
     'beneficiaryCategories': beneficiaryCategories.toList(),
     'shareBeneficiary': shareBeneficiary,
+    'professionalSummary': professionalSummary,
     'education': education,
+    'certifications': certifications.toList(),
     'skills': skills.toList(),
     'workExperience': workExperience,
     'employmentType': employmentType,
@@ -154,12 +163,15 @@ class Account {
     'visibility': visibility,
     'resumeName': resumeName,
     'resumeStoragePath': resumeStoragePath,
+    'resumeFileId': resumeFileId,
     'profileDone': profileDone,
   };
 
   Map<String, Object?> toPublicProfileMap() => {
     'displayName': displayName,
+    'professionalSummary': professionalSummary,
     'education': education,
+    'certifications': certifications.toList(),
     'skills': skills.toList(),
     'workExperience': workExperience,
     'employmentType': employmentType,
@@ -241,59 +253,42 @@ class AccountStore extends ChangeNotifier implements AccountRepository {
   Future<void> saveCurrent() async {
     final account = _current;
     if (account == null) return;
-    await HabiAuthService.instance.saveUser(
-      account.uid,
-      account.toPrivateMap(),
-    );
-    await HabiAuthService.instance.saveSeekerProfile(
-      account.uid,
-      account.toPublicProfileMap(),
+    await HabiAuthService.instance.saveSeekerAccountAndProfile(
+      uid: account.uid,
+      account: account.toPrivateMap(),
+      profile: account.toPublicProfileMap(),
     );
     notifyListeners();
-  }
-
-  Future<void> saveResume({
-    required String name,
-    required Uint8List bytes,
-  }) async {
-    final account = _current;
-    if (account == null) throw StateError('No signed-in job-seeker profile.');
-    if (!name.toLowerCase().endsWith('.pdf') ||
-        bytes.isEmpty ||
-        bytes.length > 10 * 1024 * 1024) {
-      throw ArgumentError(
-        'Resume must be a non-empty PDF no larger than 10 MB.',
-      );
-    }
-    final path = await HabiStorageService.instance.uploadBytes(
-      path: 'resumes/${account.uid}/resume.pdf',
-      bytes: bytes,
-      contentType: 'application/pdf',
-    );
-    account.resumeName = name;
-    account.resumeStoragePath = path;
-    account.resumeFileBytes = bytes;
-    await saveCurrent();
   }
 
   Future<void> removeResume() async {
     final account = _current;
     if (account == null) return;
-    final path = account.resumeStoragePath;
-    if (path.isNotEmpty) await HabiStorageService.instance.delete(path);
+    final previous = (
+      account.resumeName,
+      account.resumeStoragePath,
+      account.resumeFileId,
+    );
     account.resumeName = '';
     account.resumeStoragePath = '';
+    account.resumeFileId = '';
     account.resumeFileBytes = null;
-    await saveCurrent();
-  }
-
-  Future<Uint8List?> loadResume() async {
-    final account = _current;
-    final path = account?.resumeStoragePath ?? '';
-    if (path.isEmpty) return null;
-    final bytes = await HabiStorageService.instance.downloadBytes(path);
-    account!.resumeFileBytes = bytes;
-    return bytes;
+    try {
+      await saveCurrent();
+    } catch (_) {
+      account
+        ..resumeName = previous.$1
+        ..resumeStoragePath = previous.$2
+        ..resumeFileId = previous.$3;
+      rethrow;
+    }
+    if (previous.$3.isNotEmpty) {
+      try {
+        await HabiFirestoreFileStore.instance.delete(previous.$3);
+      } catch (_) {
+        // The profile reference is cleared; legacy orphan cleanup is best effort.
+      }
+    }
   }
 
   /// Persists edits made by existing profile and settings forms.

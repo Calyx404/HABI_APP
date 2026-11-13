@@ -56,9 +56,15 @@ class _NotificationPageState extends State<NotificationSettingsPage> {
     listenable: widget.viewModel,
     builder: (context, _) => _Page(
       title: 'Notification Settings',
-      subtitle: 'Choose which updates appear in your HABI account.',
+      subtitle: 'Choose which optional alerts are sent to this device.',
       children: [
         const _Label('ALERTS'),
+        toggle(
+          'pushEnabled',
+          'Push Notifications',
+          'Send selected HABI updates to this device',
+          Icons.notifications_active_outlined,
+        ),
         toggle(
           'jobAlerts',
           'Job Alerts',
@@ -72,15 +78,18 @@ class _NotificationPageState extends State<NotificationSettingsPage> {
           Icons.assignment_outlined,
         ),
         toggle(
+          'messages',
+          'Messages',
+          'New employer and applicant messages',
+          Icons.chat_bubble_outline,
+        ),
+        toggle(
           'trainingReminders',
           'Training Reminders',
           'Course reminders and learning updates',
           Icons.school_outlined,
         ),
-        if (widget.viewModel.error != null)
-          const _Note(
-            'Could not save this setting. Check your connection and try again.',
-          ),
+        if (widget.viewModel.error != null) _Note(widget.viewModel.error!),
       ],
     ),
   );

@@ -2,12 +2,14 @@ import 'package:flutter/material.dart';
 
 import 'package:habi/shared/theme/habi_background.dart';
 
-import 'package:habi/shared/theme/habi_colors.dart';
+import 'package:habi/shared/theme/habi_design_system.dart';
 import 'package:habi/features/auth/login_screen.dart';
 
 /// Screen 1: Splash screen.
 class SplashScreen extends StatefulWidget {
-  const SplashScreen({super.key});
+  const SplashScreen({super.key, this.navigateToLogin = true});
+
+  final bool navigateToLogin;
 
   @override
   State<SplashScreen> createState() => _SplashScreenState();
@@ -24,7 +26,7 @@ class _SplashScreenState extends State<SplashScreen>
     super.initState();
     _controller = AnimationController(
       vsync: this,
-      duration: Duration(milliseconds: 1600),
+      duration: const Duration(milliseconds: 1350),
     );
     _fade = CurvedAnimation(parent: _controller, curve: Curves.easeOut);
     _scale = Tween<double>(
@@ -33,17 +35,19 @@ class _SplashScreenState extends State<SplashScreen>
     ).animate(CurvedAnimation(parent: _controller, curve: Curves.easeOutCubic));
     _controller.forward();
 
-    Future.delayed(Duration(milliseconds: 3200), () {
-      if (!mounted) return;
-      Navigator.of(context).pushReplacement(
-        PageRouteBuilder(
-          transitionDuration: Duration(milliseconds: 600),
-          pageBuilder: (_, _, _) => LoginScreen(),
-          transitionsBuilder: (_, animation, _, child) =>
-              FadeTransition(opacity: animation, child: child),
-        ),
-      );
-    });
+    if (widget.navigateToLogin) {
+      Future.delayed(const Duration(milliseconds: 2600), () {
+        if (!mounted) return;
+        Navigator.of(context).pushReplacement(
+          PageRouteBuilder(
+            transitionDuration: const Duration(milliseconds: 420),
+            pageBuilder: (_, _, _) => LoginScreen(),
+            transitionsBuilder: (_, animation, _, child) =>
+                FadeTransition(opacity: animation, child: child),
+          ),
+        );
+      });
+    }
   }
 
   @override
@@ -55,11 +59,10 @@ class _SplashScreenState extends State<SplashScreen>
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: HabiColors.navy,
       body: Stack(
         fit: StackFit.expand,
         children: [
-          HabiBackground(),
+          const HabiBackground(),
           SafeArea(
             child: Center(
               child: FadeTransition(
@@ -69,29 +72,47 @@ class _SplashScreenState extends State<SplashScreen>
                   child: Column(
                     mainAxisSize: MainAxisSize.min,
                     children: [
-                      Image.asset(
-                        'assets/habi_logo.png',
-                        width: 190,
-                        filterQuality: FilterQuality.high,
-                      ),
-                      SizedBox(height: 14),
-                      Text(
-                        'HABI',
-                        style: TextStyle(
-                          fontFamily: 'serif',
-                          fontSize: 60,
-                          fontWeight: FontWeight.w500,
-                          letterSpacing: 12,
-                          color: HabiColors.cream,
+                      Container(
+                        width: 144,
+                        height: 144,
+                        padding: const EdgeInsets.all(24),
+                        decoration: BoxDecoration(
+                          color: Theme.of(context).colorScheme.surface,
+                          borderRadius: BorderRadius.circular(42),
+                          boxShadow: HabiShadows.floating,
+                        ),
+                        child: Image.asset(
+                          'assets/habi_logo.png',
+                          filterQuality: FilterQuality.medium,
                         ),
                       ),
-                      SizedBox(height: 8),
+                      const SizedBox(height: 24),
                       Text(
-                        'Every skill has a place.',
-                        style: TextStyle(
-                          fontSize: 19,
-                          letterSpacing: 0.5,
-                          color: Color(0xFFE3C896),
+                        'HABI',
+                        style: Theme.of(context).textTheme.displayLarge
+                            ?.copyWith(
+                              fontSize: 34,
+                              letterSpacing: 2,
+                              color: Theme.of(context).colorScheme.primary,
+                            ),
+                      ),
+                      const SizedBox(height: 7),
+                      Text(
+                        'Threads of opportunity',
+                        style: Theme.of(context).textTheme.bodyLarge?.copyWith(
+                          color: Theme.of(context).colorScheme.onSurfaceVariant,
+                        ),
+                      ),
+                      const SizedBox(height: 32),
+                      SizedBox(
+                        width: 72,
+                        child: LinearProgressIndicator(
+                          minHeight: 3,
+                          borderRadius: BorderRadius.circular(99),
+                          color: Theme.of(context).colorScheme.primary,
+                          backgroundColor: Theme.of(context)
+                              .colorScheme
+                              .surfaceContainerHighest,
                         ),
                       ),
                     ],

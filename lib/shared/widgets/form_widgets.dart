@@ -72,8 +72,10 @@ Widget habiDropdown({
   String? hint,
   String? Function(String?)? validator,
 }) {
+  final uniqueItems = items.toSet().toList(growable: false);
+  final selectedCount = uniqueItems.where((item) => item == value).length;
   return DropdownButtonFormField<String>(
-    initialValue: value,
+    initialValue: selectedCount == 1 ? value : null,
     isExpanded: true,
     dropdownColor: HabiColors.navyMid,
     iconEnabledColor: HabiColors.cream,
@@ -90,7 +92,7 @@ Widget habiDropdown({
           ),
     validator: validator,
     items: [
-      for (final item in items)
+      for (final item in uniqueItems)
         DropdownMenuItem(value: item, child: Text(item)),
     ],
     onChanged: (v) {

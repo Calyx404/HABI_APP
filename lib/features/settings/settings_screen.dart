@@ -6,12 +6,13 @@ import 'package:habi/data/account_store.dart';
 import 'package:habi/data/repositories/user_settings_repository.dart';
 import 'package:habi/shared/theme/habi_appearance.dart';
 import 'package:habi/shared/theme/habi_colors.dart';
-import 'package:habi/features/auth/login_screen.dart';
-import 'package:habi/backend/session_controller.dart';
+import 'package:habi/backend/logout_flow.dart';
+import 'package:habi/backend/auth_service.dart';
 import 'package:habi/features/settings/settings_feature_pages.dart';
 import 'package:habi/features/settings/seeker_settings_view_model.dart';
 import 'package:habi/features/settings/settings_view_model.dart';
 import 'package:habi/features/profile/resume_screen.dart';
+import 'package:habi/shared/widgets/habi_notification_button.dart';
 
 /// Shared avatar used by the profile and account settings screens.
 class HabiProfileAvatar extends StatelessWidget {
@@ -243,12 +244,7 @@ class SettingsScreen extends StatelessWidget {
       ),
     );
     if (shouldLogout == true && context.mounted) {
-      await HabiSessionController.instance.signOut();
-      if (!context.mounted) return;
-      Navigator.of(context).pushAndRemoveUntil(
-        MaterialPageRoute<void>(builder: (_) => LoginScreen()),
-        (route) => false,
-      );
+      await logoutAndReturnToLogin(context);
     }
   }
 }
@@ -457,21 +453,28 @@ class _AccountSettingsPageState extends State<_AccountSettingsPage> {
     ValueChanged<String?> onChanged, {
     bool required = false,
     String? helper,
-  }) => DropdownButtonFormField<String>(
-    // Ignore blank or outdated values so Flutter doesn't assert on reopen.
-    initialValue: options.contains(value) ? value : null,
-    dropdownColor: HabiColors.navyMid,
-    style: TextStyle(color: HabiColors.cream),
-    decoration: _decoration(label, helper: helper),
-    iconEnabledColor: HabiColors.gold,
-    items: options
-        .map((option) => DropdownMenuItem(value: option, child: Text(option)))
-        .toList(),
-    onChanged: onChanged,
-    validator: required
-        ? (selected) => selected == null ? 'Please select $label.' : null
-        : null,
-  );
+  }) {
+    final uniqueOptions = options.toSet().toList(growable: false);
+    final initialValue =
+        uniqueOptions.where((option) => option == value).length == 1
+        ? value
+        : null;
+    return DropdownButtonFormField<String>(
+      // Ignore blank, duplicate, or outdated values so Flutter doesn't assert.
+      initialValue: initialValue,
+      dropdownColor: HabiColors.navyMid,
+      style: TextStyle(color: HabiColors.cream),
+      decoration: _decoration(label, helper: helper),
+      iconEnabledColor: HabiColors.gold,
+      items: uniqueOptions
+          .map((option) => DropdownMenuItem(value: option, child: Text(option)))
+          .toList(),
+      onChanged: onChanged,
+      validator: required
+          ? (selected) => selected == null ? 'Please select $label.' : null
+          : null,
+    );
+  }
 
   @override
   Widget build(BuildContext context) => _FormShell(
@@ -678,6 +681,12 @@ class _EditProfilePageState extends State<_EditProfilePage> {
   late final _skills = TextEditingController(
     text: _account?.skills.join(', ') ?? '',
   );
+  late final _summary = TextEditingController(
+    text: _account?.professionalSummary ?? '',
+  );
+  late final _certifications = TextEditingController(
+    text: _account?.certifications.join(', ') ?? '',
+  );
   late final _experience = TextEditingController(
     text: _account?.workExperience ?? '',
   );
@@ -706,6 +715,8 @@ class _EditProfilePageState extends State<_EditProfilePage> {
   @override
   void dispose() {
     _skills.dispose();
+    _summary.dispose();
+    _certifications.dispose();
     _experience.dispose();
     _preferredLocation.dispose();
     _otherAccommodation.dispose();
@@ -720,7 +731,13 @@ class _EditProfilePageState extends State<_EditProfilePage> {
       return;
     }
     account
+      ..professionalSummary = _summary.text.trim()
       ..education = _education ?? ''
+      ..certifications = _certifications.text
+          .split(',')
+          .map((item) => item.trim())
+          .where((item) => item.isNotEmpty)
+          .toSet()
       ..skills = _skills.text
           .split(',')
           .map((skill) => skill.trim())
@@ -739,7 +756,11 @@ class _EditProfilePageState extends State<_EditProfilePage> {
     final saved = await _viewModel.saveProfile();
     if (!mounted) return;
     if (!saved) {
-      _showSaved('Could not save profile details. Try again.');
+      _showSaved(
+        _viewModel.error == null
+            ? 'Could not save profile details. Try again.'
+            : firebaseProfileErrorMessage(_viewModel.error!),
+      );
       return;
     }
     _showSaved('Profile details saved.');
@@ -763,18 +784,25 @@ class _EditProfilePageState extends State<_EditProfilePage> {
     String? value,
     List<String> options,
     ValueChanged<String?> onChanged,
-  ) => DropdownButtonFormField<String>(
-    // Ignore blank or outdated saved values so Flutter doesn't assert on reopen.
-    initialValue: options.contains(value) ? value : null,
-    dropdownColor: HabiColors.navyMid,
-    style: TextStyle(color: HabiColors.cream),
-    decoration: _formDecoration(label),
-    iconEnabledColor: HabiColors.gold,
-    items: options
-        .map((item) => DropdownMenuItem(value: item, child: Text(item)))
-        .toList(),
-    onChanged: onChanged,
-  );
+  ) {
+    final uniqueOptions = options.toSet().toList(growable: false);
+    final initialValue =
+        uniqueOptions.where((option) => option == value).length == 1
+        ? value
+        : null;
+    return DropdownButtonFormField<String>(
+      // Ignore blank, duplicate, or outdated values so Flutter doesn't assert.
+      initialValue: initialValue,
+      dropdownColor: HabiColors.navyMid,
+      style: TextStyle(color: HabiColors.cream),
+      decoration: _formDecoration(label),
+      iconEnabledColor: HabiColors.gold,
+      items: uniqueOptions
+          .map((item) => DropdownMenuItem(value: item, child: Text(item)))
+          .toList(),
+      onChanged: onChanged,
+    );
+  }
 
   Widget _multiSelect(
     String title,
@@ -886,6 +914,17 @@ class _EditProfilePageState extends State<_EditProfilePage> {
         ], (v) => setState(() => _education = v)),
         SizedBox(height: 12),
         TextFormField(
+          controller: _summary,
+          maxLength: 500,
+          maxLines: 3,
+          style: TextStyle(color: HabiColors.cream),
+          decoration: _formDecoration(
+            'Professional Summary (optional)',
+            hint: 'A short introduction to your strengths and goals',
+          ),
+        ),
+        SizedBox(height: 12),
+        TextFormField(
           controller: _skills,
           maxLines: 3,
           style: TextStyle(color: HabiColors.cream),
@@ -902,6 +941,16 @@ class _EditProfilePageState extends State<_EditProfilePage> {
           decoration: _formDecoration(
             'Work Experience (optional)',
             hint: 'Roles, employers, and relevant experience',
+          ),
+        ),
+        SizedBox(height: 12),
+        TextFormField(
+          controller: _certifications,
+          maxLines: 2,
+          style: TextStyle(color: HabiColors.cream),
+          decoration: _formDecoration(
+            'Certifications and qualifications (optional)',
+            hint: 'Separate items with commas',
           ),
         ),
         SizedBox(height: 12),
@@ -1092,7 +1141,9 @@ class _SettingsHeader extends StatelessWidget {
               ),
             ),
           ),
-          Image.asset('assets/habi_logo.png', width: 32, height: 32),
+          HabiNotificationButton(
+            userName: AccountStore.instance.current?.displayName ?? '',
+          ),
         ],
       ),
     );

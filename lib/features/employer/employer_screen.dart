@@ -1,6 +1,8 @@
+import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 
 import 'package:habi/shared/theme/habi_appearance.dart';
+import 'package:habi/shared/theme/habi_background.dart';
 import 'package:habi/shared/theme/habi_colors.dart';
 import 'package:habi/features/employer/employer_profile_setup_screen.dart';
 import 'package:habi/features/employer/employer_settings_pages.dart';
@@ -9,23 +11,34 @@ import 'package:habi/data/job_store.dart';
 import 'package:habi/features/messaging/messages_screen.dart';
 import 'package:habi/features/messaging/chat_screen.dart';
 import 'package:habi/data/message_store.dart';
-import 'package:habi/backend/session_controller.dart';
+import 'package:habi/backend/logout_flow.dart';
 import 'package:habi/data/repositories/user_settings_repository.dart';
 import 'package:habi/features/settings/settings_view_model.dart';
 import 'package:habi/features/jobs/post_job_screen.dart';
+import 'package:habi/data/interview_store.dart';
+import 'package:habi/backend/firestore_file_store.dart';
+import 'package:habi/features/employer/interview_schedule_dialog.dart';
+import 'package:habi/shared/widgets/habi_components.dart';
+import 'package:habi/shared/widgets/habi_ui.dart';
+import 'package:habi/shared/widgets/habi_notification_button.dart';
 
 /// Employer side of HABI: dashboard, listings, applicant review, and profile.
 class EmployerScreen extends StatefulWidget {
-  const EmployerScreen({super.key, required this.companyName});
+  const EmployerScreen({
+    super.key,
+    required this.companyName,
+    this.initialTab = 0,
+  });
 
   final String companyName;
+  final int initialTab;
 
   @override
   State<EmployerScreen> createState() => _EmployerScreenState();
 }
 
 class _EmployerScreenState extends State<EmployerScreen> {
-  int _tab = 0;
+  late int _tab = widget.initialTab.clamp(0, 4).toInt();
   int _jobFilter = 0;
   int _applicantFilter = 0;
   final _applicantSearch = TextEditingController();
@@ -95,7 +108,10 @@ class _EmployerScreenState extends State<EmployerScreen> {
   Future<void> _openMessages() async {
     await Navigator.of(context).push<void>(
       MaterialPageRoute(
-        builder: (_) => MessagesScreen(userName: widget.companyName),
+        builder: (_) => MessagesScreen(
+          userName: widget.companyName,
+          showBottomNavigation: false,
+        ),
       ),
     );
     if (mounted) setState(() {});
@@ -115,8 +131,7 @@ class _EmployerScreenState extends State<EmployerScreen> {
       body: Stack(
         fit: StackFit.expand,
         children: [
-          Image.asset('assets/habi_bg.jpg', fit: BoxFit.cover),
-          Container(color: HabiColors.navy.withAlpha(225)),
+          const HabiBackground(),
           SafeArea(
             child: AnimatedSwitcher(
               duration: const Duration(milliseconds: 260),
@@ -151,131 +166,275 @@ class _EmployerScreenState extends State<EmployerScreen> {
 
   Widget _home() => ListenableBuilder(
     listenable: JobStore.instance,
-    builder: (context, _) => ListView(
-      padding: const EdgeInsets.fromLTRB(20, 16, 20, 24),
-      children: [
-        Row(
-          children: [
-            const Spacer(),
-            IconButton(
-              onPressed: () => _toast('You’re all caught up.'),
-              icon: Icon(
-                Icons.notifications_none,
-                color: HabiColors.cream,
-                size: 27,
-              ),
-            ),
-            InkWell(
-              onTap: () => setState(() => _tab = 3),
-              customBorder: CircleBorder(),
-              child: Container(
-                width: 48,
-                height: 48,
-                decoration: BoxDecoration(
-                  color: HabiColors.navyMid,
-                  shape: BoxShape.circle,
-                  border: Border.all(color: HabiColors.gold.withAlpha(160)),
-                ),
-                child: Icon(Icons.business, color: HabiColors.gold),
-              ),
-            ),
-          ],
-        ),
-        const SizedBox(height: 4),
-        Container(
-          padding: const EdgeInsets.fromLTRB(18, 18, 16, 18),
-          decoration: BoxDecoration(
-            color: HabiColors.navyMid,
-            borderRadius: BorderRadius.circular(20),
-            border: Border.all(color: HabiColors.cream.withAlpha(50)),
-          ),
-          child: Row(
+    builder: (context, _) {
+      final applications = [
+        for (final job in _jobs)
+          ...JobStore.instance.applicationsForJob(job.id),
+      ];
+      final active = _publishedJobs.length;
+      final newCount = applications
+          .where((a) => a.status == 'Submitted')
+          .length;
+      final reviewCount = applications
+          .where((a) => a.status == 'Under Review')
+          .length;
+      final shortlisted = applications
+          .where((a) => a.status == 'Shortlisted')
+          .length;
+      return ListView(
+        padding: const EdgeInsets.fromLTRB(20, 16, 20, 24),
+        children: [
+          Row(
             children: [
               Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      'Welcome back,\n${widget.companyName}!',
-                      style: TextStyle(
-                        color: HabiColors.cream,
-                        fontSize: 21,
-                        fontWeight: FontWeight.bold,
+                child: Text(
+                  'HABI  /  EMPLOYER',
+                  style: Theme.of(context).textTheme.labelLarge?.copyWith(
+                    color: HabiColors.teal,
+                    fontWeight: FontWeight.w800,
+                    letterSpacing: 1.2,
+                  ),
+                ),
+              ),
+              HabiNotificationButton(userName: widget.companyName),
+              InkWell(
+                onTap: () => setState(() => _tab = 4),
+                customBorder: CircleBorder(),
+                child: Container(
+                  width: 48,
+                  height: 48,
+                  decoration: BoxDecoration(
+                    color: HabiColors.navyMid,
+                    shape: BoxShape.circle,
+                    border: Border.all(color: HabiColors.gold.withAlpha(160)),
+                  ),
+                  child: Icon(Icons.business, color: HabiColors.gold),
+                ),
+              ),
+            ],
+          ),
+          if (EmployerStore.instance.current?.verificationStatus != 'verified')
+            _verificationBanner(),
+          const SizedBox(height: 4),
+          Container(
+            padding: const EdgeInsets.fromLTRB(18, 18, 16, 18),
+            decoration: BoxDecoration(
+              color: HabiColors.navyMid,
+              borderRadius: BorderRadius.circular(20),
+              border: Border.all(color: HabiColors.cream.withAlpha(50)),
+            ),
+            child: Row(
+              children: [
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'Welcome back,\n${widget.companyName}!',
+                        style: TextStyle(
+                          color: HabiColors.cream,
+                          fontSize: 21,
+                          fontWeight: FontWeight.bold,
+                        ),
                       ),
-                    ),
-                    const SizedBox(height: 6),
-                    Text(
-                      'Let’s find great talent together.',
-                      style: TextStyle(
-                        color: HabiColors.cream.withAlpha(220),
-                        fontSize: 13,
+                      const SizedBox(height: 6),
+                      Text(
+                        'Let’s find great talent together.',
+                        style: TextStyle(
+                          color: HabiColors.cream.withAlpha(220),
+                          fontSize: 13,
+                        ),
                       ),
-                    ),
-                  ],
+                    ],
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Icon(Icons.business, color: HabiColors.gold, size: 58),
+              ],
+            ),
+          ),
+          if (EmployerStore.instance
+                  .byCompanyName(widget.companyName)
+                  ?.profileComplete !=
+              true) ...[
+            const SizedBox(height: 14),
+            _profileCompletionPrompt(),
+          ],
+          const SizedBox(height: 18),
+          HabiSectionHeader(
+            title: 'Recruitment at a glance',
+            action: 'Analytics',
+            onAction: _showAnalytics,
+          ),
+          const SizedBox(height: 8),
+          Row(
+            children: [
+              Expanded(
+                child: _metricCard(
+                  'Active jobs',
+                  '$active',
+                  Icons.work_outline,
                 ),
               ),
               const SizedBox(width: 8),
-              Icon(Icons.business, color: HabiColors.gold, size: 58),
+              Expanded(
+                child: _metricCard(
+                  'Applicants',
+                  '${applications.length}',
+                  Icons.groups_outlined,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          Row(
+            children: [
+              Expanded(
+                child: _metricCard(
+                  'New',
+                  '$newCount',
+                  Icons.mark_email_unread_outlined,
+                ),
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: _metricCard(
+                  'Under review',
+                  '$reviewCount',
+                  Icons.rate_review_outlined,
+                ),
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: _metricCard(
+                  'Shortlisted',
+                  '$shortlisted',
+                  Icons.star_outline,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 16),
+          Row(
+            children: [
+              Expanded(
+                child: _dashboardAction(
+                  Icons.work_outline,
+                  'Post a Job',
+                  'Create a new job listing',
+                  _postJob,
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: _dashboardAction(
+                  Icons.groups_outlined,
+                  'View Applicants',
+                  'Review candidates',
+                  () => setState(() => _tab = 2),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 24),
+          Row(
+            children: [
+              Expanded(
+                child: Text(
+                  'Your Job Postings',
+                  style: TextStyle(
+                    color: HabiColors.cream,
+                    fontSize: 20,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ),
+              TextButton(
+                onPressed: () => setState(() => _tab = 1),
+                child: Text(
+                  'See All',
+                  style: TextStyle(color: HabiColors.gold),
+                ),
+              ),
+            ],
+          ),
+          if (_publishedJobs.isEmpty)
+            _dashboardEmptyJobs()
+          else
+            ..._publishedJobs.take(3).map(_jobTile),
+          const SizedBox(height: 10),
+          _growthCard(),
+        ],
+      );
+    },
+  );
+
+  Widget _metricCard(String label, String value, IconData icon) => Card(
+    child: Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 12),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(icon, color: HabiColors.teal, size: 20),
+          const SizedBox(height: 7),
+          Text(
+            value,
+            style: Theme.of(context).textTheme.titleLarge
+                ?.copyWith(color: HabiColors.teal),
+          ),
+          Text(
+            label,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: Theme.of(context).textTheme.labelSmall,
+          ),
+        ],
+      ),
+    ),
+  );
+
+  void _showAnalytics() {
+    final applications = [
+      for (final job in _jobs) ...JobStore.instance.applicationsForJob(job.id),
+    ];
+    showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      builder: (context) => SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.all(20),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                'Recruitment overview',
+                style: Theme.of(context).textTheme.titleLarge,
+              ),
+              const SizedBox(height: 14),
+              for (final status in [
+                'Submitted',
+                'Under Review',
+                'Shortlisted',
+                'Interview Scheduled',
+                'Offer Extended',
+                'Hired',
+                'Not Selected',
+              ])
+                ListTile(
+                  dense: true,
+                  title: Text(status),
+                  trailing: Text(
+                    '${applications.where((a) => a.status == status || (status == 'Interview Scheduled' && a.status == 'Interview')).length}',
+                  ),
+                ),
+              const Text('Counts reflect currently loaded Firestore records.'),
             ],
           ),
         ),
-        if (EmployerStore.instance
-                .byCompanyName(widget.companyName)
-                ?.profileComplete !=
-            true) ...[
-          const SizedBox(height: 14),
-          _profileCompletionPrompt(),
-        ],
-        const SizedBox(height: 16),
-        Row(
-          children: [
-            Expanded(
-              child: _dashboardAction(
-                Icons.work_outline,
-                'Post a Job',
-                'Create a new job listing',
-                _postJob,
-              ),
-            ),
-            const SizedBox(width: 12),
-            Expanded(
-              child: _dashboardAction(
-                Icons.groups_outlined,
-                'View Applicants',
-                'Review candidates',
-                () => setState(() => _tab = 2),
-              ),
-            ),
-          ],
-        ),
-        const SizedBox(height: 24),
-        Row(
-          children: [
-            Expanded(
-              child: Text(
-                'Your Job Postings',
-                style: TextStyle(
-                  color: HabiColors.cream,
-                  fontSize: 20,
-                  fontWeight: FontWeight.w700,
-                ),
-              ),
-            ),
-            TextButton(
-              onPressed: () => setState(() => _tab = 1),
-              child: Text('See All', style: TextStyle(color: HabiColors.gold)),
-            ),
-          ],
-        ),
-        if (_publishedJobs.isEmpty)
-          _dashboardEmptyJobs()
-        else
-          ..._publishedJobs.take(3).map(_jobTile),
-        const SizedBox(height: 10),
-        _growthCard(),
-      ],
-    ),
-  );
+      ),
+    );
+  }
 
   Widget _dashboardAction(
     IconData icon,
@@ -366,6 +525,62 @@ class _EmployerScreenState extends State<EmployerScreen> {
       ],
     ),
   );
+
+  Widget _verificationBanner() {
+    final account = EmployerStore.instance.current;
+    final status = account?.verificationStatus ?? 'pending';
+    final label = switch (status) {
+      'underReview' => 'Under review',
+      'rejected' => 'Verification rejected',
+      'suspended' => 'Verification suspended',
+      _ => 'Verification pending',
+    };
+    final explanation = switch (status) {
+      'underReview' => 'Your business documents are being reviewed.',
+      'rejected' =>
+        account?.verificationReason.isNotEmpty == true
+            ? account!.verificationReason
+            : 'Review your business details and contact HABI support.',
+      'suspended' =>
+        account?.verificationReason.isNotEmpty == true
+            ? account!.verificationReason
+            : 'Contact HABI support for more information.',
+      _ => 'Employer verification is optional. You can publish jobs without submitting supporting documents.',
+    };
+    return Container(
+      margin: const EdgeInsets.only(top: 10, bottom: 10),
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: HabiColors.navyMid,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: HabiColors.gold.withAlpha(150)),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(Icons.verified_user_outlined, color: HabiColors.gold),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  label,
+                  style: const TextStyle(fontWeight: FontWeight.w700),
+                ),
+                const SizedBox(height: 4),
+                Text(explanation),
+                TextButton(
+                  onPressed: _openCompanyProfile,
+                  child: const Text('Review business details'),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
 
   Widget _dashboardEmptyJobs() => Container(
     padding: const EdgeInsets.fromLTRB(18, 20, 18, 18),
@@ -582,6 +797,14 @@ class _EmployerScreenState extends State<EmployerScreen> {
                       ? 'Draft'
                       : job.closed
                       ? 'Closed'
+                      : job.moderationStatus == 'pending_review'
+                      ? 'Pending Review'
+                      : job.moderationStatus == 'changesRequested'
+                      ? 'Changes Requested'
+                      : job.moderationStatus == 'rejected'
+                      ? 'Rejected'
+                      : job.moderationStatus == 'hidden'
+                      ? 'Hidden'
                       : 'Active',
                 ),
               ],
@@ -629,18 +852,48 @@ class _EmployerScreenState extends State<EmployerScreen> {
                     PopupMenuButton<String>(
                       icon: Icon(Icons.more_horiz, color: HabiColors.cream),
                       color: HabiColors.navyMid,
-                      onSelected: (action) {
-                        final updated = switch (action) {
-                          'close' => job.copyWith(closed: true),
-                          'reopen' => job.copyWith(closed: false),
-                          'archive' => job.copyWith(isArchived: true),
-                          'restore' => job.copyWith(isArchived: false),
-                          _ => job,
+                      onSelected: (action) async {
+                        final status = switch (action) {
+                          'close' => 'closed',
+                          'reopen' || 'restore' => 'published',
+                          'archive' || 'deleteDraft' => 'archived',
+                          _ => null,
                         };
-                        JobStore.instance.update(updated);
+                        if (status == null) return;
+                        final confirmed = await HabiConfirmationDialog.show(
+                          context,
+                          title: action == 'deleteDraft'
+                              ? 'Delete draft?'
+                              : 'Update listing?',
+                          message: action == 'deleteDraft'
+                              ? 'This removes the draft from your active list.'
+                              : 'This listing will be marked ${status == 'published' ? 'active' : status}.',
+                          confirm: action == 'deleteDraft'
+                              ? 'Delete draft'
+                              : 'Continue',
+                        );
+                        if (!confirmed || !mounted) return;
+                        try {
+                          await JobStore.instance.setListingStatus(
+                            job.id,
+                            status,
+                          );
+                        } catch (error) {
+                          if (mounted) {
+                            _toast('Could not update listing: $error');
+                          }
+                        }
                       },
                       itemBuilder: (_) => [
-                        if (job.isArchived)
+                        if (job.isDraft)
+                          PopupMenuItem(
+                            value: 'deleteDraft',
+                            child: Text(
+                              'Delete Draft',
+                              style: TextStyle(color: HabiColors.error),
+                            ),
+                          )
+                        else if (job.isArchived)
                           PopupMenuItem(
                             value: 'restore',
                             child: Text(
@@ -692,7 +945,7 @@ class _EmployerScreenState extends State<EmployerScreen> {
         final statusMatches =
             _applicantFilter == 0 ||
             (_applicantFilter == 1 &&
-                entry.application.status == 'Interview') ||
+                entry.application.status == 'Shortlisted') ||
             (_applicantFilter == 2 && entry.application.status == 'Hired');
         final textMatches =
             query.isEmpty ||
@@ -702,6 +955,16 @@ class _EmployerScreenState extends State<EmployerScreen> {
       }).toList();
       return Column(
         children: [
+          if (JobStore.instance.loadError != null)
+            MaterialBanner(
+              content: Text(JobStore.instance.loadError!),
+              actions: [
+                TextButton(
+                  onPressed: JobStore.instance.retryLoad,
+                  child: const Text('Retry'),
+                ),
+              ],
+            ),
           _pageHeader(
             'Applicants',
             onBack: () => setState(() => _tab = 0),
@@ -831,11 +1094,17 @@ class _EmployerScreenState extends State<EmployerScreen> {
     children: [
       Align(
         alignment: Alignment.centerRight,
-        child: IconButton.filled(
-          tooltip: 'Settings',
-          onPressed: _openSettings,
-          style: IconButton.styleFrom(backgroundColor: HabiColors.navyMid),
-          icon: Icon(Icons.settings_outlined, color: HabiColors.gold),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            HabiNotificationButton(userName: widget.companyName),
+            IconButton.filled(
+              tooltip: 'Settings',
+              onPressed: _openSettings,
+              style: IconButton.styleFrom(backgroundColor: HabiColors.navyMid),
+              icon: Icon(Icons.settings_outlined, color: HabiColors.gold),
+            ),
+          ],
         ),
       ),
       Container(
@@ -1093,6 +1362,8 @@ class _EmployerScreenState extends State<EmployerScreen> {
               ),
             ),
             ?trailing,
+            if (trailing != null) const SizedBox(width: 4),
+            HabiNotificationButton(userName: widget.companyName),
           ],
         ),
       );
@@ -1198,92 +1469,59 @@ class _EmployerScreenState extends State<EmployerScreen> {
     ),
   );
 
-  Widget _bottomBar() => Container(
-    decoration: BoxDecoration(
-      color: HabiColors.navy,
-      border: Border(top: BorderSide(color: HabiColors.cream.withAlpha(40))),
-    ),
-    child: SafeArea(
-      top: false,
-      child: SizedBox(
-        height: 76,
-        child: Row(
-          children: [
-            _navItem(0, Icons.home_filled, 'Home'),
-            _navItem(2, Icons.groups_outlined, 'Applicants'),
-            SizedBox(
-              width: 76,
-              child: Center(
-                child: Transform.translate(
-                  offset: const Offset(0, -8),
-                  child: Container(
-                    width: 58,
-                    height: 58,
-                    padding: const EdgeInsets.all(9),
-                    decoration: BoxDecoration(
-                      color: HabiColors.navyMid,
-                      shape: BoxShape.circle,
-                      border: Border.all(color: HabiColors.gold, width: 3),
-                    ),
-                    child: Image.asset('assets/habi_logo.png'),
-                  ),
-                ),
-              ),
+  Widget _bottomBar() => ListenableBuilder(
+    listenable: MessageStore.instance,
+    builder: (context, _) {
+      final unread = MessageStore.instance.unreadTotal(widget.companyName);
+      return NavigationBar(
+        selectedIndex: _tab,
+        onDestinationSelected: (index) {
+          if (index == 3) {
+            _openMessages();
+          } else {
+            setState(() => _tab = index);
+          }
+        },
+        backgroundColor: Theme.of(context).colorScheme.surface,
+        indicatorColor: Theme.of(context).colorScheme.secondaryContainer,
+        destinations: [
+          const NavigationDestination(
+            icon: Icon(Icons.dashboard_outlined),
+            selectedIcon: Icon(Icons.dashboard),
+            label: 'Dashboard',
+          ),
+          const NavigationDestination(
+            icon: Icon(Icons.work_outline),
+            selectedIcon: Icon(Icons.work),
+            label: 'Jobs',
+          ),
+          const NavigationDestination(
+            icon: Icon(Icons.groups_outlined),
+            selectedIcon: Icon(Icons.groups),
+            label: 'Applicants',
+          ),
+          NavigationDestination(
+            icon: Badge(
+              isLabelVisible: unread > 0,
+              label: Text(unread > 9 ? '9+' : '$unread'),
+              child: const Icon(Icons.chat_bubble_outline),
             ),
-            Expanded(
-              child: InkWell(
-                onTap: _openMessages,
-                child: Column(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    Icon(
-                      Icons.chat_bubble_outline,
-                      color: HabiColors.cream.withAlpha(180),
-                      size: 26,
-                    ),
-                    const SizedBox(height: 4),
-                    Text(
-                      'Message',
-                      style: TextStyle(
-                        color: HabiColors.cream.withAlpha(180),
-                        fontSize: 11,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
+            selectedIcon: Badge(
+              isLabelVisible: unread > 0,
+              label: Text(unread > 9 ? '9+' : '$unread'),
+              child: const Icon(Icons.chat),
             ),
-            _navItem(3, Icons.person_outline, 'Profile'),
-          ],
-        ),
-      ),
-    ),
+            label: 'Messages',
+          ),
+          const NavigationDestination(
+            icon: Icon(Icons.business_outlined),
+            selectedIcon: Icon(Icons.business),
+            label: 'Organization',
+          ),
+        ],
+      );
+    },
   );
-
-  Widget _navItem(int index, IconData icon, String title) {
-    final active = _tab == index;
-    final color = active ? HabiColors.cream : HabiColors.cream.withAlpha(190);
-    return Expanded(
-      child: InkWell(
-        onTap: () => setState(() => _tab = index),
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Icon(icon, color: color, size: 26),
-            const SizedBox(height: 4),
-            Text(
-              title,
-              style: TextStyle(
-                color: color,
-                fontSize: 11,
-                fontWeight: active ? FontWeight.w700 : FontWeight.normal,
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
 }
 
 class EmployerSettingsScreen extends StatelessWidget {
@@ -1387,6 +1625,7 @@ class EmployerSettingsScreen extends StatelessWidget {
       foregroundColor: HabiColors.cream,
       title: Text('Settings', style: TextStyle(fontWeight: FontWeight.w700)),
       actions: [
+        HabiNotificationButton(userName: companyName),
         Padding(
           padding: const EdgeInsets.only(right: 16),
           child: Image.asset('assets/habi_logo.png', width: 34, height: 34),
@@ -1396,8 +1635,7 @@ class EmployerSettingsScreen extends StatelessWidget {
     body: Stack(
       fit: StackFit.expand,
       children: [
-        Image.asset('assets/habi_bg.jpg', fit: BoxFit.cover),
-        Container(color: HabiColors.navy.withAlpha(225)),
+        const HabiBackground(),
         SafeArea(
           child: ListView(
             padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
@@ -1489,10 +1727,7 @@ class EmployerSettingsScreen extends StatelessWidget {
               const SizedBox(height: 12),
               FilledButton.icon(
                 onPressed: () async {
-                  await HabiSessionController.instance.signOut();
-                  if (context.mounted) {
-                    Navigator.of(context).popUntil((route) => route.isFirst);
-                  }
+                  await logoutAndReturnToLogin(context);
                 },
                 icon: Icon(Icons.logout),
                 label: Text('Log Out', style: TextStyle(color: Colors.white)),
@@ -1565,40 +1800,24 @@ class ApplicantDetailsScreen extends StatelessWidget {
   }
 
   Future<void> _setInterviewSchedule(BuildContext context) async {
-    final now = DateTime.now();
-    final date = await showDatePicker(
-      context: context,
-      initialDate: now.add(const Duration(days: 1)),
-      firstDate: now,
-      lastDate: now.add(const Duration(days: 365)),
-      helpText: 'Choose interview date',
-    );
-    if (date == null || !context.mounted) return;
-
-    final time = await showTimePicker(
-      context: context,
-      initialTime: TimeOfDay.fromDateTime(now),
-      helpText: 'Choose interview time',
-    );
-    if (time == null || !context.mounted) return;
-
-    final scheduledAt = DateTime(
-      date.year,
-      date.month,
-      date.day,
-      time.hour,
-      time.minute,
-    );
-    final localizations = MaterialLocalizations.of(context);
-    final dateLabel = localizations.formatMediumDate(scheduledAt);
-    final timeLabel = localizations.formatTimeOfDay(time);
+    if (!canTransitionApplicationStatus(
+      application.status,
+      'Interview Scheduled',
+    )) {
+      return;
+    }
+    final input = await InterviewScheduleDialog.show(context);
+    if (input == null || !context.mounted) return;
     try {
-      await JobStore.instance.setApplicationStatus(
-        application,
-        'Interview',
-        notificationTitle: 'Interview scheduled',
-        notificationBody:
-            'Your interview for ${job.title} is scheduled for $dateLabel at $timeLabel.',
+      await InterviewStore.instance.schedule(
+        job: job,
+        application: application,
+        startsAt: input.startsAt,
+        endsAt: input.endsAt,
+        format: input.format,
+        locationOrLink: input.locationOrLink,
+        instructions: input.instructions,
+        createdBy: application.employerId,
       );
     } catch (_) {
       if (context.mounted) _showSaveError(context);
@@ -1624,6 +1843,42 @@ class ApplicantDetailsScreen extends StatelessWidget {
     if (!context.mounted) return;
     onStatusChanged();
     Navigator.of(context).pop();
+  }
+
+  Future<void> _downloadApplicationResume(BuildContext context) async {
+    final fileId = application.resumeFileId;
+    final path = application.resumeStoragePath;
+    if (fileId == null || fileId.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            path?.isNotEmpty == true
+                ? 'This resume uses an older Cloud Storage reference and is unavailable. Ask the applicant to upload a new resume.'
+                : 'No submitted resume is available.',
+          ),
+        ),
+      );
+      return;
+    }
+    try {
+      final bytes = await HabiFirestoreFileStore.instance.download(fileId);
+      final savedPath = await FilePicker.saveFile(
+        dialogTitle: 'Save submitted resume',
+        fileName: application.resumeName ?? 'resume.pdf',
+        bytes: bytes,
+      );
+      if (!context.mounted || savedPath == null) return;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('Submitted resume saved.')));
+    } catch (_) {
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Could not access this submitted resume.'),
+        ),
+      );
+    }
   }
 
   void _messageApplicant(BuildContext context) {
@@ -1652,12 +1907,14 @@ class ApplicantDetailsScreen extends StatelessWidget {
       backgroundColor: HabiColors.navy,
       foregroundColor: HabiColors.cream,
       title: Text('Applicant Details'),
+      actions: [
+        HabiNotificationButton(userName: MessageStore.instance.currentUserName),
+      ],
     ),
     body: Stack(
       fit: StackFit.expand,
       children: [
-        Image.asset('assets/habi_bg.jpg', fit: BoxFit.cover),
-        Container(color: HabiColors.navy.withAlpha(225)),
+        const HabiBackground(),
         ListView(
           padding: const EdgeInsets.fromLTRB(20, 16, 20, 28),
           children: [
@@ -1733,6 +1990,116 @@ class ApplicantDetailsScreen extends StatelessWidget {
               'Status',
               application.status,
             ),
+            const SizedBox(height: 18),
+            Text(
+              'Applicant profile',
+              style: TextStyle(
+                color: HabiColors.cream,
+                fontSize: 17,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+            const SizedBox(height: 6),
+            _profileSnapshotRow(
+              Icons.person_outline,
+              'Professional summary',
+              'professionalSummary',
+            ),
+            _profileSnapshotRow(
+              Icons.school_outlined,
+              'Education',
+              'education',
+            ),
+            _profileSnapshotRow(
+              Icons.workspace_premium_outlined,
+              'Certifications',
+              'certifications',
+            ),
+            _profileSnapshotRow(Icons.star_outline, 'Skills', 'skills'),
+            _profileSnapshotRow(
+              Icons.work_history_outlined,
+              'Experience',
+              'workExperience',
+            ),
+            _profileSnapshotRow(
+              Icons.schedule_outlined,
+              'Employment preference',
+              'employmentType',
+            ),
+            _profileSnapshotRow(
+              Icons.home_work_outlined,
+              'Work arrangement',
+              'workArrangement',
+            ),
+            _profileSnapshotRow(
+              Icons.event_available_outlined,
+              'Availability',
+              'availabilityDays',
+            ),
+            if (application.profileSnapshot['shareBeneficiary'] == true)
+              _profileSnapshotRow(
+                Icons.volunteer_activism_outlined,
+                'Shared beneficiary categories',
+                'beneficiaryCategories',
+              ),
+            if (application.profileSnapshot['shareAccessibility'] == true) ...[
+              _profileSnapshotRow(
+                Icons.accessible_outlined,
+                'Shared accessibility needs',
+                'accessibility',
+              ),
+              _profileSnapshotRow(
+                Icons.info_outline,
+                'Accessibility details',
+                'accessibilityDetails',
+              ),
+            ],
+            if (application.profileSnapshot.isEmpty)
+              Text(
+                'No profile snapshot was included with this application.',
+                style: TextStyle(color: HabiColors.cream.withAlpha(185)),
+              ),
+            const SizedBox(height: 18),
+            Text(
+              'Resume submitted for this application',
+              style: TextStyle(
+                color: HabiColors.cream,
+                fontSize: 17,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+            if ((application.resumeFileId?.isNotEmpty ?? false) ||
+                (application.resumeStoragePath?.isNotEmpty ?? false)) ...[
+              _detailRow(
+                Icons.picture_as_pdf_outlined,
+                'File',
+                application.resumeName ?? 'Submitted PDF',
+              ),
+              _detailRow(
+                Icons.verified_user_outlined,
+                'Consent recorded',
+                application.resumeConsentAt == null
+                    ? 'Yes'
+                    : MaterialLocalizations.of(context)
+                          .formatMediumDate(application.resumeConsentAt!),
+              ),
+              const SizedBox(height: 8),
+              if (application.resumeFileId?.isNotEmpty ?? false)
+                OutlinedButton.icon(
+                  onPressed: () => _downloadApplicationResume(context),
+                  icon: const Icon(Icons.download_outlined),
+                  label: const Text('Download submitted resume'),
+                )
+              else
+                Text(
+                  'This submitted resume uses an older Cloud Storage reference and is unavailable. Ask the applicant to upload a new resume.',
+                  style: TextStyle(color: HabiColors.cream.withAlpha(185)),
+                ),
+            ] else
+              Text(
+                'No resume was included with this application.',
+                style: TextStyle(color: HabiColors.cream.withAlpha(185)),
+              ),
             if (job.description.trim().isNotEmpty) ...[
               const SizedBox(height: 18),
               Text(
@@ -1752,53 +2119,78 @@ class ApplicantDetailsScreen extends StatelessWidget {
                 ),
               ),
             ],
+            if (application.status == 'Interview Scheduled')
+              _interviewManagementPanel(context),
             const SizedBox(height: 22),
-            SizedBox(
-              height: 48,
-              child: FilledButton.icon(
-                onPressed: () => _changeStatus(context, 'Interview'),
-                icon: Icon(Icons.star_outline),
-                label: Text('Shortlist Applicant'),
-                style: FilledButton.styleFrom(
-                  backgroundColor: HabiColors.gold,
-                  foregroundColor: HabiColors.ink,
+            if (application.status == 'Submitted')
+              SizedBox(
+                height: 48,
+                child: FilledButton.icon(
+                  onPressed: () => _changeStatus(context, 'Under Review'),
+                  icon: const Icon(Icons.visibility_outlined),
+                  label: const Text('Start Review'),
                 ),
               ),
-            ),
-            const SizedBox(height: 10),
-            SizedBox(
-              height: 48,
-              child: OutlinedButton.icon(
-                onPressed: application.status == 'Hired'
-                    ? null
-                    : () => _setInterviewSchedule(context),
-                icon: Icon(Icons.event_outlined),
-                label: Text('Set Interview Schedule'),
-                style: OutlinedButton.styleFrom(
-                  foregroundColor: HabiColors.gold,
-                  side: BorderSide(color: HabiColors.gold),
+            if (application.status == 'Under Review')
+              SizedBox(
+                height: 48,
+                child: FilledButton.icon(
+                  onPressed: () => _changeStatus(context, 'Shortlisted'),
+                  icon: const Icon(Icons.star_outline),
+                  label: const Text('Shortlist Applicant'),
+                  style: FilledButton.styleFrom(
+                    backgroundColor: HabiColors.gold,
+                    foregroundColor: HabiColors.ink,
+                  ),
                 ),
               ),
-            ),
-            const SizedBox(height: 10),
-            SizedBox(
-              height: 48,
-              child: FilledButton.icon(
-                onPressed: application.status == 'Hired'
-                    ? null
-                    : () => _hireApplicant(context),
-                icon: Icon(Icons.check_circle_outline),
-                label: Text(
-                  application.status == 'Hired'
-                      ? 'Applicant Hired'
-                      : 'Hire Applicant',
-                ),
-                style: FilledButton.styleFrom(
-                  backgroundColor: HabiColors.gold,
-                  foregroundColor: HabiColors.ink,
+            if (application.status == 'Shortlisted') ...[
+              const SizedBox(height: 10),
+              SizedBox(
+                height: 48,
+                child: OutlinedButton.icon(
+                  onPressed: () => _setInterviewSchedule(context),
+                  icon: const Icon(Icons.event_outlined),
+                  label: const Text('Set Interview Schedule'),
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: HabiColors.gold,
+                    side: BorderSide(color: HabiColors.gold),
+                  ),
                 ),
               ),
-            ),
+            ],
+            if (application.status == 'Interview Completed') ...[
+              const SizedBox(height: 10),
+              SizedBox(
+                height: 48,
+                child: FilledButton.icon(
+                  onPressed: () => _changeStatus(context, 'Offer Extended'),
+                  icon: const Icon(Icons.mark_email_read_outlined),
+                  label: const Text('Extend Offer'),
+                ),
+              ),
+            ],
+            if (application.status == 'Offer Extended') ...[
+              const SizedBox(height: 10),
+              SizedBox(
+                height: 48,
+                child: FilledButton.icon(
+                  onPressed: () => _hireApplicant(context),
+                  icon: const Icon(Icons.check_circle_outline),
+                  label: const Text('Mark Applicant Hired'),
+                  style: FilledButton.styleFrom(
+                    backgroundColor: HabiColors.gold,
+                    foregroundColor: HabiColors.ink,
+                  ),
+                ),
+              ),
+            ],
+            if (application.status == 'Hired')
+              ListTile(
+                contentPadding: EdgeInsets.zero,
+                leading: Icon(Icons.check_circle, color: HabiColors.gold),
+                title: Text('Applicant hired'),
+              ),
             const SizedBox(height: 10),
             SizedBox(
               height: 48,
@@ -1817,6 +2209,120 @@ class ApplicantDetailsScreen extends StatelessWidget {
       ],
     ),
   );
+
+  Widget _interviewManagementPanel(BuildContext context) =>
+      StreamBuilder<List<HabiInterview>>(
+        stream: InterviewStore.instance.watchForApplication(
+          '${application.jobId}_${application.applicantId}',
+          asEmployer: true,
+        ),
+        builder: (context, snapshot) {
+          final records = snapshot.data;
+          if (records == null || records.isEmpty) {
+            return const Padding(
+              padding: EdgeInsets.only(top: 12),
+              child: Text('Interview details are loading or unavailable.'),
+            );
+          }
+          final interview = records.first;
+          if (interview.status != 'scheduled') {
+            return const Padding(
+              padding: EdgeInsets.only(top: 12),
+              child: Text('This interview is no longer scheduled.'),
+            );
+          }
+          final date = MaterialLocalizations.of(context)
+              .formatFullDate(interview.startsAt);
+          final time = MaterialLocalizations.of(context)
+              .formatTimeOfDay(TimeOfDay.fromDateTime(interview.startsAt));
+          return Card(
+            margin: const EdgeInsets.only(top: 14),
+            color: HabiColors.navyMid,
+            child: Padding(
+              padding: const EdgeInsets.all(14),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'Scheduled interview',
+                    style: TextStyle(
+                      color: HabiColors.cream,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                  const SizedBox(height: 6),
+                  Text(
+                    '$date at $time • ${interview.format}',
+                    style: TextStyle(color: HabiColors.cream),
+                  ),
+                  if (interview.locationOrLink.isNotEmpty)
+                    SelectableText(
+                      interview.locationOrLink,
+                      style: TextStyle(color: HabiColors.gold),
+                    ),
+                  if (interview.applicantResponse != 'pending')
+                    Text(
+                      'Applicant response: ${interview.applicantResponse}',
+                      style: TextStyle(color: HabiColors.cream.withAlpha(190)),
+                    ),
+                  Wrap(
+                    spacing: 6,
+                    children: [
+                      TextButton(
+                        onPressed: () async {
+                          final input = await InterviewScheduleDialog.show(
+                            context,
+                          );
+                          if (input == null || !context.mounted) return;
+                          await InterviewStore.instance.reschedule(
+                            interview: interview,
+                            startsAt: input.startsAt,
+                            endsAt: input.endsAt,
+                            format: input.format,
+                            locationOrLink: input.locationOrLink,
+                            instructions: input.instructions,
+                          );
+                          if (context.mounted) {
+                            onStatusChanged();
+                            Navigator.of(context).pop();
+                          }
+                        },
+                        child: const Text('Reschedule'),
+                      ),
+                      TextButton(
+                        onPressed: () async {
+                          await InterviewStore.instance.updateStatus(
+                            interview,
+                            'completed',
+                          );
+                          if (context.mounted) {
+                            onStatusChanged();
+                            Navigator.of(context).pop();
+                          }
+                        },
+                        child: const Text('Mark completed'),
+                      ),
+                      TextButton(
+                        onPressed: () async {
+                          await InterviewStore.instance.updateStatus(
+                            interview,
+                            'cancelled',
+                          );
+                          if (context.mounted) {
+                            onStatusChanged();
+                            Navigator.of(context).pop();
+                          }
+                        },
+                        child: const Text('Cancel interview'),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+          );
+        },
+      );
 
   Widget _detailRow(IconData icon, String label, String value) => Padding(
     padding: const EdgeInsets.symmetric(vertical: 7),
@@ -1843,6 +2349,14 @@ class ApplicantDetailsScreen extends StatelessWidget {
       ],
     ),
   );
+
+  Widget _profileSnapshotRow(IconData icon, String label, String key) {
+    final raw = application.profileSnapshot[key];
+    final value = raw is Iterable
+        ? raw.where((item) => item.toString().trim().isNotEmpty).join(', ')
+        : raw?.toString().trim() ?? '';
+    return _detailRow(icon, label, value.isEmpty ? 'Not provided' : value);
+  }
 }
 
 void _showSaveError(BuildContext context) {

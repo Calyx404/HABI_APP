@@ -5,7 +5,7 @@ class HabiAppearance extends ChangeNotifier {
 
   static final HabiAppearance instance = HabiAppearance._();
 
-  bool _isDarkMode = true;
+  bool _isDarkMode = false;
   bool get isDarkMode => _isDarkMode;
 
   void setDarkMode(bool value) {

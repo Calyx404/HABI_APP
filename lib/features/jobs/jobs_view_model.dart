@@ -16,17 +16,27 @@ class JobsViewModel extends ChangeNotifier {
   String _query = '';
   String? _arrangement;
   String? _employmentType;
+  String? _experience;
+  String? _workSchedule;
   JobsTab _tab = JobsTab.active;
 
   String get query => _query;
   String? get arrangement => _arrangement;
   String? get employmentType => _employmentType;
+  String? get experience => _experience;
+  String? get workSchedule => _workSchedule;
   JobsTab get tab => _tab;
   bool get isLoading => _repository.isLoading;
+  String? get loadError => _repository.loadError;
+  void retryLoad() => _repository.retryLoad();
   bool get locationRequired =>
       _tab == JobsTab.nearby && _preferredLocation.isEmpty;
   bool get hasActiveFilters =>
-      _query.isNotEmpty || _arrangement != null || _employmentType != null;
+      _query.isNotEmpty ||
+      _arrangement != null ||
+      _employmentType != null ||
+      _experience != null ||
+      _workSchedule != null;
 
   List<Job> get jobs {
     Iterable<Job> result = _repository.jobs;
@@ -46,6 +56,12 @@ class JobsViewModel extends ChangeNotifier {
     }
     if (_employmentType case final value?) {
       result = result.where((job) => job.type == value);
+    }
+    if (_experience case final value?) {
+      result = result.where((job) => job.experience == value);
+    }
+    if (_workSchedule case final value?) {
+      result = result.where((job) => job.workSchedule == value);
     }
 
     final terms = _query
@@ -105,10 +121,24 @@ class JobsViewModel extends ChangeNotifier {
     notifyListeners();
   }
 
+  void setExperience(String? value) {
+    if (_experience == value) return;
+    _experience = value;
+    notifyListeners();
+  }
+
+  void setWorkSchedule(String? value) {
+    if (_workSchedule == value) return;
+    _workSchedule = value;
+    notifyListeners();
+  }
+
   void clearFilters() {
     _query = '';
     _arrangement = null;
     _employmentType = null;
+    _experience = null;
+    _workSchedule = null;
     notifyListeners();
   }
 

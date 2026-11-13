@@ -42,6 +42,7 @@ class HabiAuthService {
         'email': user.email,
         'displayName': displayName,
         'role': role.name,
+        'accountStatus': 'active',
         'profileComplete': false,
         'createdAt': FieldValue.serverTimestamp(),
         'updatedAt': FieldValue.serverTimestamp(),
@@ -59,6 +60,15 @@ class HabiAuthService {
           'updatedAt': FieldValue.serverTimestamp(),
         });
       }
+      batch.set(_db.collection('admin_user_directory').doc(user.uid), {
+        'uid': user.uid,
+        'email': user.email,
+        'displayName': displayName,
+        'role': role.name,
+        'accountStatus': 'active',
+        'createdAt': FieldValue.serverTimestamp(),
+        'updatedAt': FieldValue.serverTimestamp(),
+      });
       await batch.commit();
       return credential;
     } catch (_) {
@@ -98,6 +108,25 @@ class HabiAuthService {
   Future<DocumentSnapshot<Map<String, dynamic>>> userDocument(String uid) =>
       _db.collection('users').doc(uid).get();
 
+  Future<void> ensureAdminDirectoryEntry(
+    String uid,
+    Map<String, dynamic> userData,
+  ) async {
+    if (userData['accountStatus'] == 'suspended') return;
+    final createdAt = userData['createdAt'];
+    await _db.collection('admin_user_directory').doc(uid).set({
+      'uid': uid,
+      'email': userData['email'] ?? '',
+      'displayName': userData['displayName'] ?? '',
+      'role': userData['role'] ?? '',
+      'accountStatus': 'active',
+      'createdAt': createdAt is Timestamp
+          ? createdAt
+          : FieldValue.serverTimestamp(),
+      'updatedAt': FieldValue.serverTimestamp(),
+    }, SetOptions(merge: true));
+  }
+
   Future<void> saveUser(String uid, Map<String, Object?> data) =>
       _db.collection('users').doc(uid).set({
         ...data,
@@ -111,7 +140,84 @@ class HabiAuthService {
         'updatedAt': FieldValue.serverTimestamp(),
       }, SetOptions(merge: true));
 
+  Future<void> saveSeekerAccountAndProfile({
+    required String uid,
+    required Map<String, Object?> account,
+    required Map<String, Object?> profile,
+  }) async {
+    final batch = _db.batch();
+    batch.set(_db.collection('users').doc(uid), {
+      ...account,
+      'displayName': profile['displayName'] ?? '',
+      'updatedAt': FieldValue.serverTimestamp(),
+    }, SetOptions(merge: true));
+    batch.set(_db.collection('seeker_profiles').doc(uid), {
+      ...profile,
+      'uid': uid,
+      'updatedAt': FieldValue.serverTimestamp(),
+    }, SetOptions(merge: true));
+    batch.set(_db.collection('admin_user_directory').doc(uid), {
+      'email': account['email'] ?? '',
+      'displayName': profile['displayName'] ?? '',
+      'updatedAt': FieldValue.serverTimestamp(),
+    }, SetOptions(merge: true));
+    await batch.commit();
+  }
+
+  Future<void> saveEmployerProfileAndUser({
+    required String uid,
+    required Map<String, Object?> employerProfile,
+    required Map<String, Object?> userProfile,
+  }) async {
+    final batch = _db.batch();
+    batch.set(_db.collection('employer_profiles').doc(uid), {
+      ...employerProfile,
+      'updatedAt': FieldValue.serverTimestamp(),
+    }, SetOptions(merge: true));
+    batch.set(_db.collection('users').doc(uid), {
+      ...userProfile,
+      'updatedAt': FieldValue.serverTimestamp(),
+    }, SetOptions(merge: true));
+    batch.set(_db.collection('admin_user_directory').doc(uid), {
+      'email': currentUser?.email ?? '',
+      'displayName': userProfile['displayName'] ?? '',
+      'updatedAt': FieldValue.serverTimestamp(),
+    }, SetOptions(merge: true));
+    await batch.commit();
+  }
+
   Future<void> signOut() => _auth.signOut();
+}
+
+String firebaseProfileErrorMessage(Object error) {
+  if (error is FirebaseException) {
+    final code = error.code.replaceFirst('firestore/', '');
+    return switch (code) {
+      'permission-denied' || 'unauthorized' => 'You do not have permission to save this change. Check your account role and try again.',
+      'resource-exhausted' || 'quota-exceeded' => 'The service could not save this change right now. Please try again later.',
+      'unauthenticated' =>
+        'Your Firebase session expired. Sign in again and retry.',
+      'unavailable' || 'network-request-failed' =>
+        'Firebase is temporarily unavailable. Check the network and retry.',
+      _ => 'Firebase could not save this change. Please try again.',
+    };
+  }
+  final detail = error.toString().toLowerCase();
+  if (detail.contains('permission-denied') || detail.contains('unauthorized')) {
+    return 'You do not have permission to save this change. Check your account role and try again.';
+  }
+  if (detail.contains('resource-exhausted') ||
+      detail.contains('quota-exceeded')) {
+    return 'The service could not save this change right now. Please try again later.';
+  }
+  if (detail.contains('bucket-not-found') ||
+      detail.contains('no-default-bucket')) {
+    return 'This record refers to a legacy file that is no longer available.';
+  }
+  if (detail.contains('network') || detail.contains('unavailable')) {
+    return 'Firebase is temporarily unavailable. Check the network and retry.';
+  }
+  return 'Could not save this change. Please try again.';
 }
 
 String firebaseAuthMessage(FirebaseAuthException error) {

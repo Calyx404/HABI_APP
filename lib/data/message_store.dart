@@ -160,6 +160,7 @@ class MessageStore extends ChangeNotifier implements MessagingRepository {
   String currentUserId = '';
   String currentUserName = '';
   final Map<String, Conversation> _conversations = {};
+  final Map<String, Future<void>> _conversationEnsures = {};
   final List<StreamSubscription> _messageSubscriptions = [];
   StreamSubscription<QuerySnapshot<Map<String, dynamic>>>? _conversationSub;
 
@@ -173,6 +174,7 @@ class MessageStore extends ChangeNotifier implements MessagingRepository {
       unawaited(subscription.cancel());
     }
     _messageSubscriptions.clear();
+    _conversationEnsures.clear();
     _conversations.clear();
     currentUserId = uid;
     currentUserName = displayName;
@@ -260,13 +262,19 @@ class MessageStore extends ChangeNotifier implements MessagingRepository {
     );
     _conversations[id] = created;
     _watchMessages(created);
+    _ensureConversationWhenNeeded(created);
+    notifyListeners();
+    return created;
+  }
+
+  void _ensureConversationWhenNeeded(Conversation conversation) {
+    final ensure = _ensureConversation(conversation);
+    _conversationEnsures[conversation.id] = ensure;
     unawaited(
-      _ensureConversation(created).catchError((Object error) {
+      ensure.catchError((Object error) {
         debugPrint('Could not start HABI conversation: $error');
       }),
     );
-    notifyListeners();
-    return created;
   }
 
   Future<void> _ensureConversation(Conversation conversation) async {
@@ -321,7 +329,23 @@ class MessageStore extends ChangeNotifier implements MessagingRepository {
   ) async {
     final conversation = byId(conversationId);
     final body = text.trim();
-    if (conversation == null || body.isEmpty || currentUserId.isEmpty) return;
+    if (body.isEmpty) return;
+    if (conversation == null) {
+      throw StateError('This conversation is no longer available.');
+    }
+    if (currentUserId.isEmpty) {
+      throw StateError('Sign in again before sending a message.');
+    }
+    final ensure = _conversationEnsures[conversationId];
+    if (ensure != null) {
+      try {
+        await ensure;
+      } catch (_) {
+        final retry = _ensureConversation(conversation);
+        _conversationEnsures[conversationId] = retry;
+        await retry;
+      }
+    }
     final db = HabiFirebaseServices.instance.firestore;
     final conversationRef = db.collection('conversations').doc(conversationId);
     final messageRef = conversationRef.collection('messages').doc();
@@ -405,6 +429,7 @@ class MessageStore extends ChangeNotifier implements MessagingRepository {
       await subscription.cancel();
     }
     _messageSubscriptions.clear();
+    _conversationEnsures.clear();
     _conversations.clear();
     currentUserId = '';
     currentUserName = '';

@@ -8,6 +8,7 @@ import 'package:habi/features/jobs/job_card.dart';
 import 'package:habi/data/job_store.dart';
 import 'package:habi/features/jobs/jobs_view_model.dart';
 import 'package:habi/data/account_store.dart';
+import 'package:habi/shared/widgets/habi_notification_button.dart';
 
 /// The Jobs tab: every posted job, with Active, Nearby and Saved tabs.
 class JobsScreen extends StatefulWidget {
@@ -65,6 +66,7 @@ class _JobsScreenState extends State<JobsScreen> {
         foregroundColor: HabiColors.cream,
         elevation: 0,
         title: Text('Jobs', style: TextStyle(fontWeight: FontWeight.w600)),
+        actions: [HabiNotificationButton(userName: widget.userName)],
       ),
       body: Stack(
         fit: StackFit.expand,
@@ -77,7 +79,10 @@ class _JobsScreenState extends State<JobsScreen> {
                 children: [
                   _buildSearchField(),
                   SizedBox(height: 12),
-                  _buildTabs(),
+                  ListenableBuilder(
+                    listenable: _viewModel,
+                    builder: (context, _) => _buildTabs(),
+                  ),
                   SizedBox(height: 16),
                   Expanded(
                     child: ListenableBuilder(
@@ -87,6 +92,33 @@ class _JobsScreenState extends State<JobsScreen> {
                           return const Center(
                             child: CircularProgressIndicator(
                               semanticsLabel: 'Loading jobs',
+                            ),
+                          );
+                        }
+                        if (_viewModel.loadError != null) {
+                          return Center(
+                            child: Padding(
+                              padding: const EdgeInsets.all(24),
+                              child: Column(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  const Icon(
+                                    Icons.cloud_off_outlined,
+                                    size: 42,
+                                  ),
+                                  const SizedBox(height: 10),
+                                  Text(
+                                    _viewModel.loadError!,
+                                    textAlign: TextAlign.center,
+                                  ),
+                                  const SizedBox(height: 12),
+                                  FilledButton.icon(
+                                    onPressed: _viewModel.retryLoad,
+                                    icon: const Icon(Icons.refresh),
+                                    label: const Text('Try again'),
+                                  ),
+                                ],
+                              ),
                             ),
                           );
                         }
@@ -126,28 +158,34 @@ class _JobsScreenState extends State<JobsScreen> {
         children: [
           for (var i = 0; i < _labels.length; i++)
             Expanded(
-              child: GestureDetector(
-                onTap: () => _viewModel.setTab(JobsTab.values[i]),
-                child: AnimatedContainer(
-                  duration: Duration(milliseconds: 150),
-                  padding: EdgeInsets.symmetric(vertical: 10),
-                  alignment: Alignment.center,
-                  decoration: BoxDecoration(
-                    color: _viewModel.tab.index == i
-                        ? Color(0xFFE2BB6C)
-                        : Colors.transparent,
-                    borderRadius: BorderRadius.circular(10),
-                  ),
-                  child: Text(
-                    _labels[i],
-                    style: TextStyle(
-                      fontSize: 14,
-                      fontWeight: _viewModel.tab.index == i
-                          ? FontWeight.w700
-                          : FontWeight.w500,
+              child: Semantics(
+                button: true,
+                selected: _viewModel.tab.index == i,
+                label: '${_labels[i]} jobs',
+                child: InkWell(
+                  borderRadius: BorderRadius.circular(10),
+                  onTap: () => _viewModel.setTab(JobsTab.values[i]),
+                  child: AnimatedContainer(
+                    duration: Duration(milliseconds: 150),
+                    padding: EdgeInsets.symmetric(vertical: 10),
+                    alignment: Alignment.center,
+                    decoration: BoxDecoration(
                       color: _viewModel.tab.index == i
-                          ? HabiColors.ink
-                          : HabiColors.cream,
+                          ? Color(0xFFE2BB6C)
+                          : Colors.transparent,
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                    child: Text(
+                      _labels[i],
+                      style: TextStyle(
+                        fontSize: 14,
+                        fontWeight: _viewModel.tab.index == i
+                            ? FontWeight.w700
+                            : FontWeight.w500,
+                        color: _viewModel.tab.index == i
+                            ? HabiColors.ink
+                            : HabiColors.cream,
+                      ),
                     ),
                   ),
                 ),
@@ -267,22 +305,46 @@ class _JobsScreenState extends State<JobsScreen> {
   );
 
   Future<void> _showFilters() async {
-    var arrangement = _viewModel.arrangement;
-    var type = _viewModel.employmentType;
     final arrangements =
         JobStore.instance.jobs
-            .map((job) => job.setup)
+            .map((job) => job.setup.trim())
             .where((value) => value.isNotEmpty)
             .toSet()
             .toList()
           ..sort();
     final types =
         JobStore.instance.jobs
-            .map((job) => job.type)
+            .map((job) => job.type.trim())
             .where((value) => value.isNotEmpty)
             .toSet()
             .toList()
           ..sort();
+    var arrangement = arrangements.contains(_viewModel.arrangement)
+        ? _viewModel.arrangement
+        : null;
+    var type = types.contains(_viewModel.employmentType)
+        ? _viewModel.employmentType
+        : null;
+    final experiences =
+        JobStore.instance.jobs
+            .map((job) => job.experience.trim())
+            .where((value) => value.isNotEmpty)
+            .toSet()
+            .toList()
+          ..sort();
+    final schedules =
+        JobStore.instance.jobs
+            .map((job) => job.workSchedule.trim())
+            .where((value) => value.isNotEmpty)
+            .toSet()
+            .toList()
+          ..sort();
+    var experience = experiences.contains(_viewModel.experience)
+        ? _viewModel.experience
+        : null;
+    var schedule = schedules.contains(_viewModel.workSchedule)
+        ? _viewModel.workSchedule
+        : null;
     await showModalBottomSheet<void>(
       context: context,
       isScrollControlled: true,
@@ -296,69 +358,116 @@ class _JobsScreenState extends State<JobsScreen> {
               20,
               20 + MediaQuery.viewInsetsOf(context).bottom,
             ),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                Text(
-                  'Filter jobs',
-                  style: Theme.of(context).textTheme.titleLarge,
-                ),
-                SizedBox(height: 16),
-                DropdownButtonFormField<String?>(
-                  initialValue: arrangement,
-                  decoration: InputDecoration(labelText: 'Work arrangement'),
-                  items: [
-                    DropdownMenuItem<String?>(value: null, child: Text('Any')),
-                    ...arrangements.map(
-                      (value) => DropdownMenuItem<String?>(
-                        value: value,
-                        child: Text(value),
+            child: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Text(
+                    'Filter jobs',
+                    style: Theme.of(context).textTheme.titleLarge,
+                  ),
+                  SizedBox(height: 16),
+                  DropdownButtonFormField<String?>(
+                    initialValue: arrangement,
+                    decoration: InputDecoration(labelText: 'Work arrangement'),
+                    items: [
+                      DropdownMenuItem<String?>(
+                        value: null,
+                        child: Text('Any'),
                       ),
-                    ),
-                  ],
-                  onChanged: (value) =>
-                      setModalState(() => arrangement = value),
-                ),
-                SizedBox(height: 12),
-                DropdownButtonFormField<String?>(
-                  initialValue: type,
-                  decoration: InputDecoration(labelText: 'Job type'),
-                  items: [
-                    DropdownMenuItem<String?>(value: null, child: Text('Any')),
-                    ...types.map(
-                      (value) => DropdownMenuItem<String?>(
-                        value: value,
-                        child: Text(value),
+                      ...arrangements.map(
+                        (value) => DropdownMenuItem<String?>(
+                          value: value,
+                          child: Text(value),
+                        ),
                       ),
-                    ),
-                  ],
-                  onChanged: (value) => setModalState(() => type = value),
-                ),
-                SizedBox(height: 18),
-                Row(
-                  children: [
-                    TextButton(
-                      onPressed: () {
-                        _viewModel.clearFilters();
-                        _searchController.clear();
-                        Navigator.pop(context);
-                      },
-                      child: Text('Clear filters'),
-                    ),
-                    Spacer(),
-                    FilledButton(
-                      onPressed: () {
-                        _viewModel
-                          ..setArrangement(arrangement)
-                          ..setEmploymentType(type);
-                        Navigator.pop(context);
-                      },
-                      child: Text('Show jobs'),
-                    ),
-                  ],
-                ),
-              ],
+                    ],
+                    onChanged: (value) =>
+                        setModalState(() => arrangement = value),
+                  ),
+                  SizedBox(height: 12),
+                  DropdownButtonFormField<String?>(
+                    initialValue: type,
+                    decoration: InputDecoration(labelText: 'Job type'),
+                    items: [
+                      DropdownMenuItem<String?>(
+                        value: null,
+                        child: Text('Any'),
+                      ),
+                      ...types.map(
+                        (value) => DropdownMenuItem<String?>(
+                          value: value,
+                          child: Text(value),
+                        ),
+                      ),
+                    ],
+                    onChanged: (value) => setModalState(() => type = value),
+                  ),
+                  SizedBox(height: 12),
+                  DropdownButtonFormField<String?>(
+                    initialValue: experience,
+                    decoration: InputDecoration(labelText: 'Experience level'),
+                    items: [
+                      DropdownMenuItem<String?>(
+                        value: null,
+                        child: Text('Any'),
+                      ),
+                      ...experiences.map(
+                        (value) => DropdownMenuItem<String?>(
+                          value: value,
+                          child: Text(value),
+                        ),
+                      ),
+                    ],
+                    onChanged: (value) =>
+                        setModalState(() => experience = value),
+                  ),
+                  SizedBox(height: 12),
+                  DropdownButtonFormField<String?>(
+                    initialValue: schedule,
+                    decoration: InputDecoration(labelText: 'Work schedule'),
+                    items: [
+                      DropdownMenuItem<String?>(
+                        value: null,
+                        child: Text('Any'),
+                      ),
+                      ...schedules.map(
+                        (value) => DropdownMenuItem<String?>(
+                          value: value,
+                          child: Text(value),
+                        ),
+                      ),
+                    ],
+                    onChanged: (value) => setModalState(() => schedule = value),
+                  ),
+                  SizedBox(height: 18),
+                  Row(
+                    children: [
+                      TextButton(
+                        onPressed: () {
+                          _viewModel.clearFilters();
+                          _searchController.clear();
+                          Navigator.pop(context);
+                        },
+                        child: Text('Clear filters'),
+                      ),
+                      Spacer(),
+                      FilledButton(
+                        onPressed: () {
+                          _viewModel
+                            ..setArrangement(arrangement)
+                            ..setEmploymentType(type)
+                            ..setExperience(experience)
+                            ..setWorkSchedule(schedule);
+                          Navigator.pop(context);
+                        },
+                        child: Text('Show jobs'),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
             ),
           ),
         ),

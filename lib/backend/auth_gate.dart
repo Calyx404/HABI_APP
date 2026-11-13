@@ -1,11 +1,14 @@
+import 'dart:async';
+
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 
 import 'package:habi/data/account_store.dart';
 import 'package:habi/features/employer/employer_profile_setup_screen.dart';
+import 'package:habi/features/admin/admin_screen.dart';
 import 'package:habi/features/employer/employer_screen.dart';
 import 'package:habi/data/employer_store.dart';
-import 'package:habi/features/home/home_screen.dart';
+import 'package:habi/features/home/job_seeker_shell.dart';
 import 'package:habi/data/job_store.dart';
 import 'package:habi/data/message_store.dart';
 import 'package:habi/data/notification_store.dart';
@@ -13,6 +16,7 @@ import 'package:habi/features/profile/profile_setup_screen.dart';
 import 'package:habi/features/auth/splash_screen.dart';
 import 'package:habi/backend/auth_service.dart';
 import 'package:habi/backend/session_controller.dart';
+import 'package:habi/backend/push_notification_service.dart';
 import 'package:habi/data/repositories/user_settings_repository.dart';
 import 'package:habi/shared/theme/habi_appearance.dart';
 
@@ -24,7 +28,7 @@ class HabiAuthGate extends StatelessWidget {
     stream: HabiAuthService.instance.authStateChanges,
     builder: (context, snapshot) {
       if (snapshot.connectionState == ConnectionState.waiting) {
-        return const SplashScreen();
+        return const SplashScreen(navigateToLogin: false);
       }
       final user = snapshot.data;
       if (user == null) return const SplashScreen();
@@ -46,6 +50,7 @@ class _SignedInRouterState extends State<_SignedInRouter> {
   late final Future<Widget> _destination = _loadDestination();
 
   Future<Widget> _loadDestination() async {
+    final token = await widget.user.getIdTokenResult();
     final snapshot = await HabiAuthService.instance.userDocument(
       widget.user.uid,
     );
@@ -54,6 +59,14 @@ class _SignedInRouterState extends State<_SignedInRouter> {
       await HabiSessionController.instance.signOut();
       return const SplashScreen();
     }
+    if (data['accountStatus'] == 'suspended') {
+      return const SuspendedAccountScreen();
+    }
+    await HabiAuthService.instance.ensureAdminDirectoryEntry(
+      widget.user.uid,
+      data,
+    );
+    if (token.claims?['admin'] == true) return const AdminScreen();
     try {
       final preferences = await FirestoreUserSettingsRepository().load(
         widget.user.uid,
@@ -64,7 +77,13 @@ class _SignedInRouterState extends State<_SignedInRouter> {
       debugPrint('Could not load saved app settings: $error');
     }
     final role = data['role'] as String?;
-    JobStore.instance.bindUser(widget.user.uid);
+    unawaited(
+      PushNotificationService.instance.bindUser(widget.user.uid).catchError((
+        Object error,
+      ) {
+        debugPrint('Could not initialize push notifications: $error');
+      }),
+    );
     MessageStore.instance.bindUser(widget.user.uid);
     NotificationStore.instance.bindUser(widget.user.uid);
 
@@ -74,6 +93,7 @@ class _SignedInRouterState extends State<_SignedInRouter> {
       JobStore.instance.bindUser(
         widget.user.uid,
         displayName: account.displayName,
+        asEmployer: false,
       );
       MessageStore.instance.bindUser(
         widget.user.uid,
@@ -85,7 +105,7 @@ class _SignedInRouterState extends State<_SignedInRouter> {
           firstTime: true,
         );
       }
-      return HomeScreen(userName: account.displayName);
+      return JobSeekerShell(userName: account.displayName);
     }
     if (role == HabiAccountRole.employer.name) {
       await EmployerStore.instance.load(widget.user.uid);
@@ -98,6 +118,7 @@ class _SignedInRouterState extends State<_SignedInRouter> {
       JobStore.instance.bindUser(
         widget.user.uid,
         displayName: employer.companyName,
+        asEmployer: true,
       );
       MessageStore.instance.bindUser(
         widget.user.uid,
@@ -119,7 +140,7 @@ class _SignedInRouterState extends State<_SignedInRouter> {
     future: _destination,
     builder: (context, snapshot) {
       if (snapshot.hasError) {
-        return _SessionError(error: snapshot.error.toString());
+        return const _SessionError();
       }
       if (!snapshot.hasData) {
         return const Scaffold(body: Center(child: CircularProgressIndicator()));
@@ -130,9 +151,7 @@ class _SignedInRouterState extends State<_SignedInRouter> {
 }
 
 class _SessionError extends StatelessWidget {
-  const _SessionError({required this.error});
-
-  final String error;
+  const _SessionError();
 
   @override
   Widget build(BuildContext context) => Scaffold(
@@ -142,13 +161,51 @@ class _SessionError extends StatelessWidget {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Text(error, textAlign: TextAlign.center),
+            const Text(
+              'We could not load your HABI account. Check your connection and sign in again.',
+              textAlign: TextAlign.center,
+            ),
             const SizedBox(height: 12),
             FilledButton(
               onPressed: () async {
                 await HabiSessionController.instance.signOut();
               },
               child: const Text('Sign out'),
+            ),
+          ],
+        ),
+      ),
+    ),
+  );
+}
+
+class SuspendedAccountScreen extends StatelessWidget {
+  const SuspendedAccountScreen({super.key});
+
+  @override
+  Widget build(BuildContext context) => Scaffold(
+    body: Center(
+      child: Padding(
+        padding: const EdgeInsets.all(24),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Icon(Icons.lock_outline, size: 48),
+            const SizedBox(height: 16),
+            Text(
+              'Account access is restricted',
+              style: Theme.of(context).textTheme.titleLarge,
+            ),
+            const SizedBox(height: 8),
+            const Text(
+              'Your HABI account is currently suspended. Contact HABI support if you believe this is a mistake.',
+              textAlign: TextAlign.center,
+            ),
+            const SizedBox(height: 16),
+            FilledButton.icon(
+              onPressed: HabiSessionController.instance.signOut,
+              icon: const Icon(Icons.logout),
+              label: const Text('Sign out'),
             ),
           ],
         ),
